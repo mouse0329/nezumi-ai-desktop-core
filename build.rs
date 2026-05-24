@@ -24,7 +24,7 @@ fn build_llama(target: &str) {
     }
 
     if env::var("CARGO_FEATURE_CUDA").is_ok() {
-        cfg.define("LLAMA_CUDA", "ON");
+        cfg.define("LLAMA_CUDA", "ON").define("GGML_CUDA", "ON").define("CMAKE_CUDA_ARCHITECTURES", "89");
     }
     if env::var("CARGO_FEATURE_METAL").is_ok() && target.contains("apple") {
         cfg.define("LLAMA_METAL", "ON");
@@ -38,6 +38,8 @@ fn build_llama(target: &str) {
     println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
     println!("cargo:rustc-link-search=native={}/build/llama.cpp/src/Release", dst.display());
     println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/Release", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/ggml-cuda/Release", dst.display());
+    println!("cargo:rustc-link-lib=static=ggml-cuda");
     println!("cargo:rustc-link-lib=static=nezumi_llama_wrapper");
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
@@ -82,7 +84,11 @@ fn build_litert() {
 
 fn apply_gpu_link(target: &str) {
     if env::var("CARGO_FEATURE_CUDA").is_ok() {
+        println!("cargo:rustc-link-search=native=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2/lib/x64");
         println!("cargo:rustc-link-lib=cuda");
+        println!("cargo:rustc-link-lib=cudart");
+        println!("cargo:rustc-link-lib=cublas");
+        println!("cargo:rustc-link-lib=cublasLt");
         println!("cargo:rustc-link-lib=cublas");
     }
     if env::var("CARGO_FEATURE_METAL").is_ok() && target.contains("apple") {
