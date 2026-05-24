@@ -13,8 +13,6 @@ use std::{
     sync::Mutex,
 };
 
-// --- C ABI バインディング ---
-
 #[repr(C)]
 struct NezumiLlamaState {
     _opaque: [u8; 0],
@@ -42,18 +40,10 @@ extern "C" {
     fn nezumi_llama_free(state: *mut NezumiLlamaState);
 }
 
-// --- Rust ラッパー ---
-
-#[derive(Copy, Clone)]
-struct SendPtr<T>(*mut T);
-unsafe impl<T> Send for SendPtr<T> {}
-
 pub struct LlamaEngine {
-// ...existing code...
     state: Mutex<*mut NezumiLlamaState>,
 }
 
-// *mut NezumiLlamaState は単一スレッドから Mutex 越しにのみアクセスする
 unsafe impl Send for LlamaEngine {}
 unsafe impl Sync for LlamaEngine {}
 
@@ -88,7 +78,6 @@ impl Engine for LlamaEngine {
         }
 
         let mut guard = self.state.lock().unwrap();
-        // 既存のモデルを解放してから差し替え
         if !guard.is_null() {
             unsafe { nezumi_llama_free(*guard) };
         }
@@ -110,8 +99,7 @@ impl Engine for LlamaEngine {
         let max_tokens = req.max_tokens.unwrap_or(512) as i32;
         let temperature = req.temperature.unwrap_or(0.8);
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let tx_ptr = SendPtr(Box::into_raw(Box::new(tx)));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
         unsafe extern "C" fn token_cb(
             token: *const c_char,
@@ -122,20 +110,27 @@ impl Engine for LlamaEngine {
             if tx.send(s).is_err() { 1 } else { 0 }
         }
 
-        let state_ptr = SendPtr(ptr);
+        // ポインタを usize に変換してスレッド間で渡す（usize は Send）
+        let state_addr = ptr as usize;
+        let tx_addr = Box::into_raw(Box::new(tx)) as usize;
+        let prompt_bytes = cprompt.into_bytes_with_nul();
+
         tokio::task::spawn_blocking(move || {
+            let state_ptr = state_addr as *mut NezumiLlamaState;
+            let tx_ptr = tx_addr as *mut tokio::sync::mpsc::UnboundedSender<String>;
+            let cprompt = unsafe { CStr::from_bytes_with_nul_unchecked(&prompt_bytes) };
             let ret = unsafe {
                 nezumi_llama_generate(
-                    state_ptr.0,
+                    state_ptr,
                     cprompt.as_ptr(),
                     max_tokens,
                     temperature,
                     token_cb,
-                    tx_ptr.0 as *mut c_void,
+                    tx_ptr as *mut c_void,
                 )
             };
 
-            let tx = unsafe { Box::from_raw(tx_ptr.0) };
+            let tx = unsafe { Box::from_raw(tx_ptr) };
             if ret != 0 {
                 let _ = tx.send(format!("Error: llama error {}", ret));
             }

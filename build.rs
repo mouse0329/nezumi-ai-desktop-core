@@ -13,12 +13,12 @@ fn build_llama(target: &str) {
 
     let mut cfg = cmake::Config::new(src);
     cfg.define("CMAKE_BUILD_TYPE", "Release")
+       .profile("Release")
        .define("BUILD_SHARED_LIBS", "OFF")
        .define("LLAMA_BUILD_TESTS", "OFF")
        .define("LLAMA_BUILD_EXAMPLES", "OFF")
        .define("LLAMA_BUILD_SERVER", "OFF");
 
-    // cmake-rs は MSVC で /EHsc を渡さないため明示追加
     if target.contains("windows") {
         cfg.cxxflag("/EHsc");
     }
@@ -35,20 +35,22 @@ fn build_llama(target: &str) {
 
     let dst = cfg.build();
 
-    // cmake-rs は <dst>/build/ にビルド成果物を置く
-    println!("cargo:rustc-link-search=native={}/build", dst.display());
-    println!("cargo:rustc-link-search=native={}/build/llama.cpp", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/llama.cpp/src/Release", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/Release", dst.display());
     println!("cargo:rustc-link-lib=static=nezumi_llama_wrapper");
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
+    println!("cargo:rustc-link-lib=static=ggml-base");
+    println!("cargo:rustc-link-lib=static=ggml-cpu");
 
     apply_gpu_link(target);
 
-    // C++ 標準ライブラリ
     if target.contains("apple") {
         println!("cargo:rustc-link-lib=c++");
     } else if target.contains("windows") {
         // MSVC は自動リンク
+        println!("cargo:rustc-link-lib=advapi32");
     } else {
         println!("cargo:rustc-link-lib=stdc++");
     }
@@ -59,7 +61,6 @@ fn build_llama(target: &str) {
 fn build_litert() {
     let src = Path::new("native/litert_wrapper");
     if !src.join("CMakeLists.txt").exists() {
-        // スタブのみ: CMakeLists.txt未整備
         if src.join("litert_wrapper.cpp").exists() {
             cc::Build::new()
                 .cpp(true)
@@ -71,6 +72,7 @@ fn build_litert() {
 
     let dst = cmake::Config::new(src)
         .define("CMAKE_BUILD_TYPE", "Release")
+       .profile("Release")
         .build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
