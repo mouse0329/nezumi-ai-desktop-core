@@ -7,6 +7,10 @@ edition = "2021"
 name = "nezumiai"
 path = "src/main.rs"
 
+[[bin]]
+name = "nezumiai-tui"
+path = "src/tui.rs"
+
 [features]
 cuda   = ["nezumi-ai-desktop-core/cuda"]
 vulkan = ["nezumi-ai-desktop-core/vulkan"]
@@ -17,3 +21,5 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+ratatui   = "0.26"
+crossterm = "0.27"

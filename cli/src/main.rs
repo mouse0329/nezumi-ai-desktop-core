@@ -1,57 +1,10 @@
+mod db;
+use db::{load_db, save_db, key_from_name, ModelEntry};
+
 use futures::StreamExt;
 use nezumi_ai_core::{Config, LoadConfig, NezumiCore};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::path::PathBuf;
-
-#[derive(Deserialize, Serialize, Default, Clone)]
-struct ModelEntry {
-    name: String,
-    path: String,
-    gpu_layers: Option<i32>,
-    n_ctx: Option<i32>,
-    system_prompt: Option<String>,
-    temperature: Option<f32>,
-    max_tokens: Option<usize>,
-}
-
-#[derive(Deserialize, Serialize, Default)]
-struct ModelsDb {
-    #[serde(default)]
-    models: HashMap<String, ModelEntry>,
-}
-
-fn nezumi_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".nezumi-ai")
-}
-
-fn models_path() -> PathBuf {
-    nezumi_dir().join("models.toml")
-}
-
-fn load_db() -> ModelsDb {
-    let path = models_path();
-    if !path.exists() {
-        return ModelsDb::default();
-    }
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    toml::from_str(&content).unwrap_or_default()
-}
-
-fn save_db(db: &ModelsDb) -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(nezumi_dir())?;
-    let content = toml::to_string_pretty(db)?;
-    std::fs::write(models_path(), content)?;
-    Ok(())
-}
-
-fn key_from_name(name: &str) -> String {
-    name.replace([':', '/', ' '], "_")
-}
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -96,7 +49,6 @@ fn cmd_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let path = args.first().ok_or("path required")?;
     let opts = parse_args(args);
     let name = opts.get("name").ok_or("--name required")?;
-
     let mut db = load_db();
     let key = key_from_name(name);
     db.models.insert(key, ModelEntry {
@@ -118,13 +70,11 @@ fn cmd_set(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::Error>
     let key = key_from_name(name);
     let entry = db.models.get_mut(&key).ok_or_else(|| format!("Not found: {}", name))?;
     let opts = parse_args(args);
-
-    if let Some(v) = opts.get("gpu") { entry.gpu_layers = v.parse().ok(); }
-    if let Some(v) = opts.get("ctx") { entry.n_ctx = v.parse().ok(); }
-    if let Some(v) = opts.get("temp") { entry.temperature = v.parse().ok(); }
-    if let Some(v) = opts.get("max-tokens") { entry.max_tokens = v.parse().ok(); }
-    if let Some(v) = opts.get("system") { entry.system_prompt = Some(v.clone()); }
-
+    if let Some(v) = opts.get("gpu")        { entry.gpu_layers  = v.parse().ok(); }
+    if let Some(v) = opts.get("ctx")        { entry.n_ctx       = v.parse().ok(); }
+    if let Some(v) = opts.get("temp")       { entry.temperature = v.parse().ok(); }
+    if let Some(v) = opts.get("max-tokens") { entry.max_tokens  = v.parse().ok(); }
+    if let Some(v) = opts.get("system")     { entry.system_prompt = Some(v.clone()); }
     save_db(&db)?;
     println!("Updated: {}", name);
     Ok(())
@@ -183,18 +133,14 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
     let key = key_from_name(name);
     let entry = db.models.get(&key).ok_or_else(|| format!("Model not found: {}", name))?;
     let opts = parse_args(args);
-
-    let gpu_layers = opts.get("gpu").and_then(|v| v.parse().ok()).or(entry.gpu_layers).unwrap_or(999);
-    let n_ctx = opts.get("ctx").and_then(|v| v.parse().ok()).or(entry.n_ctx).unwrap_or(2048);
+    let gpu_layers    = opts.get("gpu").and_then(|v| v.parse().ok()).or(entry.gpu_layers).unwrap_or(999);
+    let n_ctx         = opts.get("ctx").and_then(|v| v.parse().ok()).or(entry.n_ctx).unwrap_or(2048);
     let system_prompt = opts.get("system").cloned().or_else(|| entry.system_prompt.clone());
-
     println!("Loading: {} ({})", name, entry.path);
-
     let load_config = LoadConfig { n_gpu_layers: gpu_layers, n_ctx };
     let core_config = Config { system_prompt, ..Default::default() };
     let mut core = NezumiCore::init(core_config).await?;
     core.load_model(&entry.path, load_config).await?;
-
     println!("Ready. Ctrl+C to quit.\n");
     chat_loop(&mut core).await
 }
@@ -203,26 +149,19 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
     loop {
         print!("you> ");
         io::stdout().flush()?;
-
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let input = input.trim();
         if input.is_empty() { continue; }
-
         print!("ai>  ");
         io::stdout().flush()?;
-
         let mut stream = core.chat(input).await?;
         let mut buffer = String::new();
         'chat: while let Some(token) = stream.next().await {
             buffer.push_str(&token);
             loop {
                 if let Some(idx) = buffer.find('<') {
-                    if idx > 0 {
-                        print!("{}", &buffer[..idx]);
-                        buffer.drain(..idx);
-                        continue;
-                    }
+                    if idx > 0 { print!("{}", &buffer[..idx]); buffer.drain(..idx); continue; }
                     if buffer.starts_with("<start_of_turn>") {
                         if !consume_start_of_turn_tag(&mut buffer) { break; }
                         continue;
@@ -231,10 +170,7 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
                     if consume_unknown_tag(&mut buffer) { continue; }
                     break;
                 }
-                if !buffer.is_empty() {
-                    print!("{}", buffer);
-                    buffer.clear();
-                }
+                if !buffer.is_empty() { print!("{}", buffer); buffer.clear(); }
                 break;
             }
             io::stdout().flush()?;
@@ -245,60 +181,31 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
 }
 
 fn consume_start_of_turn_tag(buffer: &mut String) -> bool {
-    const PREFIXES: [&str; 3] = [
-        "<start_of_turn>user\n",
-        "<start_of_turn>model\n",
-        "<start_of_turn>system\n",
-    ];
+    const PREFIXES: [&str; 3] = ["<start_of_turn>user\n","<start_of_turn>model\n","<start_of_turn>system\n"];
     for prefix in PREFIXES {
-        if buffer.starts_with(prefix) {
-            buffer.drain(..prefix.len());
-            return true;
-        }
+        if buffer.starts_with(prefix) { buffer.drain(..prefix.len()); return true; }
     }
     if buffer.starts_with("<start_of_turn>") {
-        if let Some(newline) = buffer.find('\n') {
-            buffer.drain(..newline + 1);
-            return true;
-        }
+        if let Some(newline) = buffer.find('\n') { buffer.drain(..newline + 1); return true; }
     }
     false
 }
 
 fn consume_unknown_tag(buffer: &mut String) -> bool {
-    if let Some(end) = buffer.find('>') {
-        buffer.drain(..=end);
-        true
-    } else {
-        false
-    }
+    if let Some(end) = buffer.find('>') { buffer.drain(..=end); true } else { false }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-
     match args.get(1).map(|s| s.as_str()) {
         Some("import") => cmd_import(&args[2..])?,
-        Some("list") => cmd_list()?,
-        Some("show") => {
-            let name = args.get(2).ok_or("name required")?;
-            cmd_show(name)?;
-        }
-        Some("set") => {
-            let name = args.get(2).ok_or("name required")?;
-            cmd_set(name, &args[3..])?;
-        }
-        Some("remove") => {
-            let name = args.get(2).ok_or("name required")?;
-            cmd_remove(name)?;
-        }
-        Some("run") => {
-            let name = args.get(2).ok_or("model name required")?;
-            cmd_run(name, &args[3..]).await?;
-        }
+        Some("list")   => cmd_list()?,
+        Some("show")   => { let name = args.get(2).ok_or("name required")?; cmd_show(name)?; }
+        Some("set")    => { let name = args.get(2).ok_or("name required")?; cmd_set(name, &args[3..])?; }
+        Some("remove") => { let name = args.get(2).ok_or("name required")?; cmd_remove(name)?; }
+        Some("run")    => { let name = args.get(2).ok_or("model name required")?; cmd_run(name, &args[3..]).await?; }
         _ => print_usage(),
     }
-
     Ok(())
 }
