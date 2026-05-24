@@ -1,4 +1,4 @@
-use crate::{
+﻿use crate::{
     engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
     engines::selector::ModelFormat,
     error::NezumiError,
@@ -21,11 +21,16 @@ struct NezumiLlamaState {
 type NezumiTokenCallback =
     unsafe extern "C" fn(token: *const c_char, user_data: *mut c_void) -> c_int;
 
+type NezumiProgressCallback =
+    unsafe extern "C" fn(progress: f32, user_data: *mut c_void);
+
 extern "C" {
     fn nezumi_llama_load(
         model_path: *const c_char,
         n_ctx: i32,
         n_gpu_layers: i32,
+        progress_cb: Option<NezumiProgressCallback>,
+        progress_user_data: *mut c_void,
     ) -> *mut NezumiLlamaState;
 
     fn nezumi_llama_generate(
@@ -72,7 +77,27 @@ impl Engine for LlamaEngine {
         let cpath = CString::new(path)
             .map_err(|_| NezumiError::ModelLoadFailed("invalid path".into()))?;
 
-        let ptr = unsafe { nezumi_llama_load(cpath.as_ptr(), config.n_ctx, config.n_gpu_layers) };
+        unsafe extern "C" fn progress_cb(progress: f32, _user_data: *mut c_void) {
+            let pct = (progress * 100.0) as u32;
+            print!("\r\x1b[2K{} {}% [{}{}]",
+                "Loading",
+                pct,
+                "#".repeat((pct / 5) as usize),
+                ".".repeat((20 - pct / 5) as usize),
+            );
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+
+        let ptr = unsafe {
+            nezumi_llama_load(
+                cpath.as_ptr(),
+                config.n_ctx,
+                config.n_gpu_layers,
+                Some(progress_cb),
+                std::ptr::null_mut(),
+            )
+        };
+        println!();
         if ptr.is_null() {
             return Err(NezumiError::ModelLoadFailed(path.to_string()));
         }
@@ -110,7 +135,6 @@ impl Engine for LlamaEngine {
             if tx.send(s).is_err() { 1 } else { 0 }
         }
 
-        // ポインタを usize に変換してスレッド間で渡す（usize は Send）
         let state_addr = ptr as usize;
         let tx_addr = Box::into_raw(Box::new(tx)) as usize;
         let prompt_bytes = cprompt.into_bytes_with_nul();

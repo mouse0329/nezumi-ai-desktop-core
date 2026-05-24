@@ -43,13 +43,21 @@ static size_t find_stop_pos(const std::string &text, size_t start_pos)
     return best;
 }
 
-NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers)
+NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers, NezumiProgressCallback progress_cb, void *progress_user_data)
 {
     llama_log_set(dummy_log_callback, nullptr);
     llama_backend_init();
 
     auto mparams = llama_model_default_params();
     mparams.n_gpu_layers = n_gpu_layers;
+    if (progress_cb) {
+        mparams.progress_callback = [](float progress, void *ctx) -> bool {
+            auto *cb = reinterpret_cast<NezumiProgressCallback>(ctx);
+            cb(progress, nullptr);
+            return true;
+        };
+        mparams.progress_callback_user_data = reinterpret_cast<void *>(progress_cb);
+    }
 
     llama_model *model = llama_model_load_from_file(model_path, mparams);
     if (!model)
