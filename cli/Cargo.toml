@@ -1,0 +1,17 @@
+[package]
+name = "nezumi-ai-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nezumi"
+path = "src/main.rs"
+
+[features]
+cuda   = ["nezumi-ai-desktop-core/cuda"]
+vulkan = ["nezumi-ai-desktop-core/vulkan"]
+
+[dependencies]
+nezumi-ai-desktop-core = { path = ".." }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"

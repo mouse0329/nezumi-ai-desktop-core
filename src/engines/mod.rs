@@ -9,7 +9,7 @@ use std::pin::Pin;
 
 pub use selector::{EngineSelector, HardwareProfile, ModelMeta, UserPreference};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineType {
     Llama,
     LiteRT,

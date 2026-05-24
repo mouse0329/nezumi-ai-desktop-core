@@ -38,8 +38,10 @@ fn build_llama(target: &str) {
     println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
     println!("cargo:rustc-link-search=native={}/build/llama.cpp/src/Release", dst.display());
     println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/Release", dst.display());
-    println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/ggml-cuda/Release", dst.display());
-    println!("cargo:rustc-link-lib=static=ggml-cuda");
+    if env::var("CARGO_FEATURE_CUDA").is_ok() {
+        println!("cargo:rustc-link-search=native={}/build/llama.cpp/ggml/src/ggml-cuda/Release", dst.display());
+        println!("cargo:rustc-link-lib=static=ggml-cuda");
+    }
     println!("cargo:rustc-link-lib=static=nezumi_llama_wrapper");
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");

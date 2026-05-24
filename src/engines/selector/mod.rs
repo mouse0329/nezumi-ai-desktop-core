@@ -99,17 +99,33 @@ impl EngineSelector {
             return EngineType::Llama;
         }
 
-        // GPU無し の場合、軽量モデルまたは速度優先ならLiteRTへフォールバック
+        // GPU無し の場合、TFLite 以外は llama.cpp を使う
         if !hw.has_gpu() {
             let is_heavy_context = meta.context_len.map_or(false, |c| c > 8192);
             let is_high_quant    = matches!(meta.quantization, Quantization::High);
             let speed_first      = matches!(pref, UserPreference::SpeedFirst);
 
-            if speed_first || (!is_heavy_context && !is_high_quant) {
+            if matches!(meta.format, ModelFormat::TfLite)
+                && (speed_first || (!is_heavy_context && !is_high_quant))
+            {
                 return EngineType::LiteRT;
             }
         }
 
         EngineType::Llama
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gguf_without_gpu_uses_llama() {
+        let meta = ModelMeta::from_path("gemma-3-1b-it-q4_k_m.gguf");
+        let hw = HardwareProfile { has_cuda: false, has_metal: false, has_vulkan: false };
+        let pref = UserPreference::Auto;
+
+        assert_eq!(EngineSelector::select(&meta, &hw, &pref), EngineType::Llama);
     }
 }

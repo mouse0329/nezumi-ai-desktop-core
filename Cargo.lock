@@ -830,6 +830,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nezumi-ai-cli"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "nezumi-ai-desktop-core",
+ "tokio",
+]
+
+[[package]]
 name = "nezumi-ai-desktop-core"
 version = "0.1.0"
 dependencies = [
