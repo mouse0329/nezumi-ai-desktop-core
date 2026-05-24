@@ -4,7 +4,7 @@ pub mod ffi;
 pub mod session;
 
 use engines::{
-    create_engine, Engine, EngineSelector, EngineType, GenerateRequest,
+    create_engine, Engine, EngineSelector, EngineType, GenerateRequest, LoadConfig,
     HardwareProfile, ModelMeta, UserPreference,
 };
 use error::NezumiError;
@@ -55,7 +55,7 @@ impl NezumiCore {
         if !engine.supports(&meta) {
             return Err(NezumiError::UnsupportedModel(path.to_string()));
         }
-        engine.load(path).await?;
+        engine.load(path, LoadConfig::default()).await?;
         self.engine = engine;
         Ok(())
     }

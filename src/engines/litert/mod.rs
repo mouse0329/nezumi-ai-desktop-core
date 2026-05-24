@@ -1,5 +1,5 @@
 use crate::{
-    engines::{Engine, GenerateRequest, ModelMeta},
+    engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
     engines::selector::ModelFormat,
     error::NezumiError,
 };
@@ -20,7 +20,7 @@ impl Engine for LiteRTEngine {
         matches!(meta.format, ModelFormat::TfLite)
     }
 
-    async fn load(&self, _path: &str) -> Result<(), NezumiError> {
+    async fn load(&self, _path: &str, _config: LoadConfig) -> Result<(), NezumiError> {
         // TODO: FFI call to native/litert_wrapper
         Ok(())
     }

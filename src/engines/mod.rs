@@ -16,6 +16,27 @@ pub enum EngineType {
 }
 
 #[derive(Debug, Clone)]
+pub struct LoadConfig {
+    pub n_gpu_layers: i32,
+    pub n_ctx: i32,
+}
+
+impl Default for LoadConfig {
+    fn default() -> Self {
+        Self { n_gpu_layers: 0, n_ctx: 2048 }
+    }
+}
+
+impl LoadConfig {
+    pub fn gpu(n_gpu_layers: i32) -> Self {
+        Self { n_gpu_layers, n_ctx: 2048 }
+    }
+    pub fn full_gpu() -> Self {
+        Self { n_gpu_layers: 999, n_ctx: 2048 }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct GenerateRequest {
     pub prompt: String,
     pub max_tokens: Option<usize>,
@@ -30,12 +51,11 @@ impl GenerateRequest {
 
 #[async_trait]
 pub trait Engine: Send + Sync {
-    async fn load(&self, path: &str) -> Result<(), NezumiError>;
+    async fn load(&self, path: &str, config: LoadConfig) -> Result<(), NezumiError>;
     async fn generate(
         &self,
         req: GenerateRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError>;
-    /// このエンジンが対象モデルをサポートするか
     fn supports(&self, meta: &ModelMeta) -> bool;
 }
 

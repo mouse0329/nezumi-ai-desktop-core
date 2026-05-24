@@ -1,5 +1,5 @@
 use crate::{
-    engines::{Engine, GenerateRequest, ModelMeta},
+    engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
     engines::selector::ModelFormat,
     error::NezumiError,
 };
@@ -68,11 +68,11 @@ impl Engine for LlamaEngine {
         matches!(meta.format, ModelFormat::Gguf | ModelFormat::Unknown)
     }
 
-    async fn load(&self, path: &str) -> Result<(), NezumiError> {
+    async fn load(&self, path: &str, config: LoadConfig) -> Result<(), NezumiError> {
         let cpath = CString::new(path)
             .map_err(|_| NezumiError::ModelLoadFailed("invalid path".into()))?;
 
-        let ptr = unsafe { nezumi_llama_load(cpath.as_ptr(), 2048, 0) };
+        let ptr = unsafe { nezumi_llama_load(cpath.as_ptr(), config.n_ctx, config.n_gpu_layers) };
         if ptr.is_null() {
             return Err(NezumiError::ModelLoadFailed(path.to_string()));
         }

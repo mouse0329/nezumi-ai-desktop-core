@@ -10,7 +10,7 @@ mod tests {
     async fn test_load_and_generate() {
         let engine = LlamaEngine::new();
 
-        engine.load(MODEL_PATH).await.expect("モデルロード失敗");
+        engine.load(MODEL_PATH, nezumi_ai_core::engines::LoadConfig::default()).await.expect("モデルロード失敗");
 
         let req = GenerateRequest {
             prompt: "Hello, who are you?".to_string(),
