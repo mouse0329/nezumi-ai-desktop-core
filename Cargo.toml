@@ -7,14 +7,23 @@ edition = "2021"
 name = "nezumi_ai_core"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["session-sqlite"]
+session-memory = []
+session-sqlite = ["sqlx"]
+cuda   = []
+metal  = []
+vulkan = []
+
 [dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio        = { version = "1", features = ["full"] }
 async-stream = "0.3"
-futures = "0.3"
-thiserror = "1"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls"] }
-serde = { version = "1", features = ["derive"] }
-async-trait = "0.1"
+futures      = "0.3"
+thiserror    = "1"
+async-trait  = "0.1"
+serde        = { version = "1", features = ["derive"] }
+sqlx         = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls"], optional = true }
 
 [build-dependencies]
-cc = "1"
+cc    = "1"
+cmake = "0.1"

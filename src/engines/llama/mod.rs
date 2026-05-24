@@ -1,30 +1,150 @@
-use crate::{engines::Engine, error::CoreError};
+use crate::{
+    engines::{Engine, GenerateRequest, ModelMeta},
+    engines::selector::ModelFormat,
+    error::NezumiError,
+};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::Stream;
-use std::pin::Pin;
+use std::{
+    ffi::{CStr, CString},
+    os::raw::{c_char, c_int, c_void},
+    pin::Pin,
+    sync::Mutex,
+};
 
-pub struct LlamaEngine;
+// --- C ABI バインディング ---
+
+#[repr(C)]
+struct NezumiLlamaState {
+    _opaque: [u8; 0],
+}
+
+type NezumiTokenCallback =
+    unsafe extern "C" fn(token: *const c_char, user_data: *mut c_void) -> c_int;
+
+extern "C" {
+    fn nezumi_llama_load(
+        model_path: *const c_char,
+        n_ctx: i32,
+        n_gpu_layers: i32,
+    ) -> *mut NezumiLlamaState;
+
+    fn nezumi_llama_generate(
+        state: *mut NezumiLlamaState,
+        prompt: *const c_char,
+        max_tokens: i32,
+        temperature: f32,
+        cb: NezumiTokenCallback,
+        user_data: *mut c_void,
+    ) -> c_int;
+
+    fn nezumi_llama_free(state: *mut NezumiLlamaState);
+}
+
+// --- Rust ラッパー ---
+
+#[derive(Copy, Clone)]
+struct SendPtr<T>(*mut T);
+unsafe impl<T> Send for SendPtr<T> {}
+
+pub struct LlamaEngine {
+// ...existing code...
+    state: Mutex<*mut NezumiLlamaState>,
+}
+
+// *mut NezumiLlamaState は単一スレッドから Mutex 越しにのみアクセスする
+unsafe impl Send for LlamaEngine {}
+unsafe impl Sync for LlamaEngine {}
 
 impl LlamaEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self { state: Mutex::new(std::ptr::null_mut()) }
+    }
+}
+
+impl Drop for LlamaEngine {
+    fn drop(&mut self) {
+        let ptr = *self.state.lock().unwrap();
+        if !ptr.is_null() {
+            unsafe { nezumi_llama_free(ptr) };
+        }
+    }
 }
 
 #[async_trait]
 impl Engine for LlamaEngine {
-    async fn load(&self, _path: &str) -> Result<(), CoreError> {
-        // TODO: FFI call to native/llama_wrapper
+    fn supports(&self, meta: &ModelMeta) -> bool {
+        matches!(meta.format, ModelFormat::Gguf | ModelFormat::Unknown)
+    }
+
+    async fn load(&self, path: &str) -> Result<(), NezumiError> {
+        let cpath = CString::new(path)
+            .map_err(|_| NezumiError::ModelLoadFailed("invalid path".into()))?;
+
+        let ptr = unsafe { nezumi_llama_load(cpath.as_ptr(), 2048, 0) };
+        if ptr.is_null() {
+            return Err(NezumiError::ModelLoadFailed(path.to_string()));
+        }
+
+        let mut guard = self.state.lock().unwrap();
+        // 既存のモデルを解放してから差し替え
+        if !guard.is_null() {
+            unsafe { nezumi_llama_free(*guard) };
+        }
+        *guard = ptr;
         Ok(())
     }
 
     async fn generate(
         &self,
-        prompt: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, CoreError> {
-        let prompt = prompt.to_string();
+        req: GenerateRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
+        let ptr = *self.state.lock().unwrap();
+        if ptr.is_null() {
+            return Err(NezumiError::ModelNotLoaded);
+        }
+
+        let cprompt = CString::new(req.prompt.clone())
+            .map_err(|_| NezumiError::InferenceError("invalid prompt".into()))?;
+        let max_tokens = req.max_tokens.unwrap_or(512) as i32;
+        let temperature = req.temperature.unwrap_or(0.8);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let tx_ptr = SendPtr(Box::into_raw(Box::new(tx)));
+
+        unsafe extern "C" fn token_cb(
+            token: *const c_char,
+            user_data: *mut c_void,
+        ) -> c_int {
+            let tx = &*(user_data as *const tokio::sync::mpsc::UnboundedSender<String>);
+            let s = CStr::from_ptr(token).to_string_lossy().into_owned();
+            if tx.send(s).is_err() { 1 } else { 0 }
+        }
+
+        let state_ptr = SendPtr(ptr);
+        tokio::task::spawn_blocking(move || {
+            let ret = unsafe {
+                nezumi_llama_generate(
+                    state_ptr.0,
+                    cprompt.as_ptr(),
+                    max_tokens,
+                    temperature,
+                    token_cb,
+                    tx_ptr.0 as *mut c_void,
+                )
+            };
+
+            let tx = unsafe { Box::from_raw(tx_ptr.0) };
+            if ret != 0 {
+                let _ = tx.send(format!("Error: llama error {}", ret));
+            }
+        });
+
         Ok(Box::pin(stream! {
-            // TODO: FFI streaming from llama.cpp
-            yield format!("[llama] {}", prompt);
+            while let Some(token) = rx.recv().await {
+                yield token;
+            }
         }))
     }
 }

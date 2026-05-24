@@ -1,4 +1,8 @@
-use crate::{engines::Engine, error::CoreError};
+use crate::{
+    engines::{Engine, GenerateRequest, ModelMeta},
+    engines::selector::ModelFormat,
+    error::NezumiError,
+};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::Stream;
@@ -12,19 +16,22 @@ impl LiteRTEngine {
 
 #[async_trait]
 impl Engine for LiteRTEngine {
-    async fn load(&self, _path: &str) -> Result<(), CoreError> {
+    fn supports(&self, meta: &ModelMeta) -> bool {
+        matches!(meta.format, ModelFormat::TfLite)
+    }
+
+    async fn load(&self, _path: &str) -> Result<(), NezumiError> {
         // TODO: FFI call to native/litert_wrapper
         Ok(())
     }
 
     async fn generate(
         &self,
-        prompt: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, CoreError> {
-        let prompt = prompt.to_string();
+        req: GenerateRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
         Ok(Box::pin(stream! {
             // TODO: FFI streaming from LiteRT
-            yield format!("[litert] {}", prompt);
+            yield format!("[litert] {}", req.prompt);
         }))
     }
 }
