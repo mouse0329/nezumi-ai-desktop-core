@@ -1,4 +1,4 @@
-ï»¿#include "llama_wrapper.h"
+#include "llama_wrapper.h"
 #include "llama.cpp/include/llama.h"
 #include <cstring>
 #include <string>
@@ -12,7 +12,7 @@ struct NezumiLlamaState
     const llama_vocab *vocab = nullptr;
 };
 
-// ãƒ­ã‚°ã‚’å®Œå…¨ã«é»™ã‚‰ã›ã‚‹
+// ƒƒO‚ğŠ®‘S‚É–Ù‚ç‚¹‚é
 void dummy_log_callback(ggml_log_level level, const char *text, void *user_data)
 {
     (void)level;
@@ -117,7 +117,7 @@ int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t m
         llama_token token_id = llama_sampler_sample(state->sampler, state->ctx, -1);
         llama_sampler_accept(state->sampler, token_id);
 
-        // çµ‚äº†åˆ¤å®š
+        // I—¹”»’è
         if (llama_vocab_is_eog(vocab, token_id))
             break;
 
