@@ -1,4 +1,7 @@
-use crate::{NezumiCore, error::{NezumiError, to_ffi_code}};
+use crate::{
+    error::{to_ffi_code, NezumiError},
+    NezumiCore,
+};
 use futures::StreamExt;
 use std::ffi::{c_char, c_void, CStr, CString};
 

@@ -1,6 +1,6 @@
-﻿use crate::{
-    engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
+use crate::{
     engines::selector::ModelFormat,
+    engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
     error::NezumiError,
 };
 use async_stream::stream;
@@ -21,8 +21,7 @@ struct NezumiLlamaState {
 type NezumiTokenCallback =
     unsafe extern "C" fn(token: *const c_char, user_data: *mut c_void) -> c_int;
 
-type NezumiProgressCallback =
-    unsafe extern "C" fn(progress: f32, user_data: *mut c_void);
+type NezumiProgressCallback = unsafe extern "C" fn(progress: f32, user_data: *mut c_void);
 
 extern "C" {
     fn nezumi_llama_load(
@@ -54,7 +53,9 @@ unsafe impl Sync for LlamaEngine {}
 
 impl LlamaEngine {
     pub fn new() -> Self {
-        Self { state: Mutex::new(std::ptr::null_mut()) }
+        Self {
+            state: Mutex::new(std::ptr::null_mut()),
+        }
     }
 }
 
@@ -74,12 +75,13 @@ impl Engine for LlamaEngine {
     }
 
     async fn load(&self, path: &str, config: LoadConfig) -> Result<(), NezumiError> {
-        let cpath = CString::new(path)
-            .map_err(|_| NezumiError::ModelLoadFailed("invalid path".into()))?;
+        let cpath =
+            CString::new(path).map_err(|_| NezumiError::ModelLoadFailed("invalid path".into()))?;
 
         unsafe extern "C" fn progress_cb(progress: f32, _user_data: *mut c_void) {
             let pct = (progress * 100.0) as u32;
-            print!("\r\x1b[2K{} {}% [{}{}]",
+            print!(
+                "\r\x1b[2K{} {}% [{}{}]",
                 "Loading",
                 pct,
                 "#".repeat((pct / 5) as usize),
@@ -126,13 +128,14 @@ impl Engine for LlamaEngine {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
-        unsafe extern "C" fn token_cb(
-            token: *const c_char,
-            user_data: *mut c_void,
-        ) -> c_int {
+        unsafe extern "C" fn token_cb(token: *const c_char, user_data: *mut c_void) -> c_int {
             let tx = &*(user_data as *const tokio::sync::mpsc::UnboundedSender<String>);
             let s = CStr::from_ptr(token).to_string_lossy().into_owned();
-            if tx.send(s).is_err() { 1 } else { 0 }
+            if tx.send(s).is_err() {
+                1
+            } else {
+                0
+            }
         }
 
         let state_addr = ptr as usize;

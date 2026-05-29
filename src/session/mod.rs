@@ -28,7 +28,9 @@ pub mod memory {
 
     impl InMemoryStore {
         pub fn new() -> Self {
-            Self { messages: Mutex::new(Vec::new()) }
+            Self {
+                messages: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -58,7 +60,7 @@ pub mod memory {
 #[cfg(feature = "session-sqlite")]
 pub mod sqlite {
     use super::*;
-    use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
     pub struct SqliteStore {
         pool: SqlitePool,
@@ -100,11 +102,16 @@ pub mod sqlite {
             )
             .fetch_all(&self.pool)
             .await?;
-            Ok(rows.into_iter().map(|(role, content)| Message { role, content }).collect())
+            Ok(rows
+                .into_iter()
+                .map(|(role, content)| Message { role, content })
+                .collect())
         }
 
         async fn clear(&self) -> Result<(), NezumiError> {
-            sqlx::query("DELETE FROM messages").execute(&self.pool).await?;
+            sqlx::query("DELETE FROM messages")
+                .execute(&self.pool)
+                .await?;
             Ok(())
         }
     }

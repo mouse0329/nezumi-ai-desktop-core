@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use nezumi_ai_core::engines::{Engine, GenerateRequest};
-    use nezumi_ai_core::engines::llama::LlamaEngine;
     use futures::StreamExt;
+    use nezumi_ai_core::engines::llama::LlamaEngine;
+    use nezumi_ai_core::engines::{Engine, GenerateRequest};
 
     const MODEL_PATH: &str = "C:\\Users\\mouse\\Downloads\\gemma-3-1b-it-q4_k_m.gguf";
 
@@ -10,7 +10,10 @@ mod tests {
     async fn test_load_and_generate() {
         let engine = LlamaEngine::new();
 
-        engine.load(MODEL_PATH, nezumi_ai_core::engines::LoadConfig::full_gpu()).await.expect("モデルロード失敗");
+        engine
+            .load(MODEL_PATH, nezumi_ai_core::engines::LoadConfig::full_gpu())
+            .await
+            .expect("モデルロード失敗");
 
         let req = GenerateRequest {
             prompt: "Hello, who are you?".to_string(),

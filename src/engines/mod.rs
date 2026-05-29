@@ -1,5 +1,5 @@
-pub mod llama;
 pub mod litert;
+pub mod llama;
 pub mod selector;
 
 use crate::error::NezumiError;
@@ -23,16 +23,25 @@ pub struct LoadConfig {
 
 impl Default for LoadConfig {
     fn default() -> Self {
-        Self { n_gpu_layers: 0, n_ctx: 2048 }
+        Self {
+            n_gpu_layers: 0,
+            n_ctx: 2048,
+        }
     }
 }
 
 impl LoadConfig {
     pub fn gpu(n_gpu_layers: i32) -> Self {
-        Self { n_gpu_layers, n_ctx: 2048 }
+        Self {
+            n_gpu_layers,
+            n_ctx: 2048,
+        }
     }
     pub fn full_gpu() -> Self {
-        Self { n_gpu_layers: 999, n_ctx: 2048 }
+        Self {
+            n_gpu_layers: 999,
+            n_ctx: 2048,
+        }
     }
 }
 
@@ -45,7 +54,11 @@ pub struct GenerateRequest {
 
 impl GenerateRequest {
     pub fn new(prompt: impl Into<String>) -> Self {
-        Self { prompt: prompt.into(), max_tokens: None, temperature: None }
+        Self {
+            prompt: prompt.into(),
+            max_tokens: None,
+            temperature: None,
+        }
     }
 }
 
@@ -61,7 +74,7 @@ pub trait Engine: Send + Sync {
 
 pub fn create_engine(engine_type: EngineType) -> Box<dyn Engine> {
     match engine_type {
-        EngineType::Llama  => Box::new(llama::LlamaEngine::new()),
+        EngineType::Llama => Box::new(llama::LlamaEngine::new()),
         EngineType::LiteRT => Box::new(litert::LiteRTEngine::new()),
     }
 }

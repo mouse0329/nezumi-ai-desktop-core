@@ -23,13 +23,13 @@ pub enum NezumiError {
 pub fn to_ffi_code(r: &Result<(), NezumiError>) -> i32 {
     match r {
         Ok(_) => 0,
-        Err(NezumiError::ModelLoadFailed(_))  => -1,
+        Err(NezumiError::ModelLoadFailed(_)) => -1,
         Err(NezumiError::UnsupportedModel(_)) => -2,
-        Err(NezumiError::EngineUnavailable(_))=> -3,
-        Err(NezumiError::InferenceError(_))   => -4,
-        Err(NezumiError::ModelNotLoaded)         => -5,
-        Err(NezumiError::FfiError(_))            => -6,
+        Err(NezumiError::EngineUnavailable(_)) => -3,
+        Err(NezumiError::InferenceError(_)) => -4,
+        Err(NezumiError::ModelNotLoaded) => -5,
+        Err(NezumiError::FfiError(_)) => -6,
         #[cfg(feature = "session-sqlite")]
-        Err(NezumiError::Db(_))                  => -7,
+        Err(NezumiError::Db(_)) => -7,
     }
 }
