@@ -1,0 +1,9 @@
+# LiteRT-LM SDK configuration
+# Set LITERT_LM_ROOT to the path of the LiteRT-LM SDK installation
+# Example for Windows:
+# [env]
+# LITERT_LM_ROOT = "C:/path/to/LiteRT-LM"
+#
+# Example for macOS/Linux:
+# [env]
+# LITERT_LM_ROOT = "/path/to/LiteRT-LM"

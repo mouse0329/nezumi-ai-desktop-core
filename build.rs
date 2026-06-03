@@ -88,13 +88,24 @@ fn build_litert() {
         return;
     }
 
-    let dst = cmake::Config::new(src)
+    // LiteRT-LM SDKビルド: LITERT_LM_ROOTが設定されている場合のみ
+    let litert_lm_root = env::var("LITERT_LM_ROOT");
+    
+    let mut cmake_config = cmake::Config::new(src);
+    cmake_config
         .define("CMAKE_BUILD_TYPE", "Release")
-        .profile("Release")
-        .build();
+        .profile("Release");
+
+    if let Ok(root) = litert_lm_root {
+        cmake_config.define("LITERT_LM_ROOT", &root);
+        println!("cargo:rustc-link-search=native={}/lib", root);
+        println!("cargo:rustc-link-lib=litert_lm_main_lib");
+    }
+
+    let dst = cmake_config.build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
-    println!("cargo:rustc-link-lib=static=nezumi_litert_wrapper");
+    println!("cargo:rustc-link-lib=static=litert_wrapper");
     println!("cargo:rerun-if-changed=native/litert_wrapper");
 }
 
