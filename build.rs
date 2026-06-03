@@ -91,7 +91,6 @@ fn apply_gpu_link(target: &str) {
         println!("cargo:rustc-link-lib=cudart");
         println!("cargo:rustc-link-lib=cublas");
         println!("cargo:rustc-link-lib=cublasLt");
-        println!("cargo:rustc-link-lib=cublas");
     }
     if env::var("CARGO_FEATURE_METAL").is_ok() && target.contains("apple") {
         println!("cargo:rustc-link-lib=framework=Metal");

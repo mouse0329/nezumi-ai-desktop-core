@@ -1,10 +1,11 @@
 mod db;
-use db::{load_db, save_db, key_from_name, ModelEntry};
+use db::{load_db, save_db, key_from_name, models_dir, ModelEntry};
 
 use futures::StreamExt;
 use nezumi_ai_core::{Config, LoadConfig, NezumiCore};
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::path::Path;
 
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -49,11 +50,38 @@ fn cmd_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let path = args.first().ok_or("path required")?;
     let opts = parse_args(args);
     let name = opts.get("name").ok_or("--name required")?;
+    let src_path = Path::new(path);
+    let file_name = src_path.file_name().ok_or("invalid source path")?;
+    let model_dir = models_dir();
+    std::fs::create_dir_all(&model_dir)?;
+
+    let mut dst_path = model_dir.join(file_name);
+    if dst_path.exists() {
+        let stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("model"));
+        let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mut index = 1;
+        loop {
+            let candidate = if ext.is_empty() {
+                model_dir.join(format!("{}-{}", stem.to_string_lossy(), index))
+            } else {
+                model_dir.join(format!("{}-{}.{}", stem.to_string_lossy(), index, ext))
+            };
+            if !candidate.exists() {
+                dst_path = candidate;
+                break;
+            }
+            index += 1;
+        }
+    }
+
+    std::fs::copy(src_path, &dst_path)?;
+    let model_path = dst_path.to_string_lossy().to_string();
+
     let mut db = load_db();
     let key = key_from_name(name);
     db.models.insert(key, ModelEntry {
         name: name.clone(),
-        path: path.clone(),
+        path: model_path.clone(),
         gpu_layers: opts.get("gpu").and_then(|v| v.parse().ok()),
         n_ctx: opts.get("ctx").and_then(|v| v.parse().ok()),
         system_prompt: opts.get("system").cloned(),
@@ -61,7 +89,7 @@ fn cmd_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         max_tokens: opts.get("max-tokens").and_then(|v| v.parse().ok()),
     });
     save_db(&db)?;
-    println!("Imported: {} -> {}", name, path);
+    println!("Imported: {} -> {}", name, model_path);
     Ok(())
 }
 
@@ -153,6 +181,8 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
         io::stdin().read_line(&mut input)?;
         let input = input.trim();
         if input.is_empty() { continue; }
+        // save user message before generating so history includes it
+        core.session.add("user", input).await?;
         print!("ai>  ");
         io::stdout().flush()?;
         let mut stream = core.chat(input).await?;
@@ -176,7 +206,6 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
             io::stdout().flush()?;
         }
         println!();
-        core.session.add("user", input).await?;
     }
 }
 

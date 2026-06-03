@@ -30,6 +30,10 @@ pub fn models_path() -> PathBuf {
     nezumi_dir().join("models.toml")
 }
 
+pub fn models_dir() -> PathBuf {
+    nezumi_dir().join("models")
+}
+
 pub fn load_db() -> ModelsDb {
     let path = models_path();
     if !path.exists() {
