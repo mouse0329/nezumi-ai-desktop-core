@@ -26,16 +26,17 @@ pub enum Quantization {
 
 impl ModelMeta {
     pub fn from_path(path: &str) -> Self {
-        let format = if path.ends_with(".gguf") {
+        let lower = path.to_lowercase();
+        let format = if lower.ends_with(".gguf") {
             ModelFormat::Gguf
-        } else if path.ends_with(".tflite") {
+        } else if lower.ends_with(".tflite") || lower.ends_with(".litertlm") {
             ModelFormat::TfLite
         } else {
             ModelFormat::Unknown
         };
 
-        let lower = path.to_lowercase();
-        let quantization = if lower.contains("q8") || lower.contains("f16") || lower.contains("f32") {
+        let quantization = if lower.contains("q8") || lower.contains("f16") || lower.contains("f32")
+        {
             Quantization::High
         } else if lower.contains("q4") || lower.contains("q5") || lower.contains("q6") {
             Quantization::Medium
@@ -45,7 +46,12 @@ impl ModelMeta {
             Quantization::Unknown
         };
 
-        Self { path: path.to_string(), format, context_len: None, quantization }
+        Self {
+            path: path.to_string(),
+            format,
+            context_len: None,
+            quantization,
+        }
     }
 }
 
@@ -59,8 +65,8 @@ pub struct HardwareProfile {
 impl HardwareProfile {
     pub fn detect() -> Self {
         Self {
-            has_cuda:   cfg!(feature = "cuda"),
-            has_metal:  cfg!(feature = "metal"),
+            has_cuda: cfg!(feature = "cuda"),
+            has_metal: cfg!(feature = "metal"),
             has_vulkan: cfg!(feature = "vulkan"),
         }
     }
@@ -89,9 +95,9 @@ impl EngineSelector {
     ///   3. GPU有無 + 量子化レベル + context_len でフォールバック判定
     pub fn select(meta: &ModelMeta, hw: &HardwareProfile, pref: &UserPreference) -> EngineType {
         match meta.format {
-            ModelFormat::TfLite  => return EngineType::LiteRT,
+            ModelFormat::TfLite => return EngineType::LiteRT,
             ModelFormat::Unknown => return EngineType::Llama,
-            ModelFormat::Gguf    => {}
+            ModelFormat::Gguf => {}
         }
 
         // QualityFirst は常にllama.cpp
@@ -102,8 +108,8 @@ impl EngineSelector {
         // GPU無し の場合、TFLite 以外は llama.cpp を使う
         if !hw.has_gpu() {
             let is_heavy_context = meta.context_len.map_or(false, |c| c > 8192);
-            let is_high_quant    = matches!(meta.quantization, Quantization::High);
-            let speed_first      = matches!(pref, UserPreference::SpeedFirst);
+            let is_high_quant = matches!(meta.quantization, Quantization::High);
+            let speed_first = matches!(pref, UserPreference::SpeedFirst);
 
             if matches!(meta.format, ModelFormat::TfLite)
                 && (speed_first || (!is_heavy_context && !is_high_quant))
@@ -123,7 +129,11 @@ mod tests {
     #[test]
     fn gguf_without_gpu_uses_llama() {
         let meta = ModelMeta::from_path("gemma-3-1b-it-q4_k_m.gguf");
-        let hw = HardwareProfile { has_cuda: false, has_metal: false, has_vulkan: false };
+        let hw = HardwareProfile {
+            has_cuda: false,
+            has_metal: false,
+            has_vulkan: false,
+        };
         let pref = UserPreference::Auto;
 
         assert_eq!(EngineSelector::select(&meta, &hw, &pref), EngineType::Llama);

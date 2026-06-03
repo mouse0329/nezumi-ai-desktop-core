@@ -4,14 +4,16 @@ pub mod ffi;
 pub mod session;
 
 use engines::{
-    create_engine, Engine, EngineSelector, EngineType, GenerateRequest,
-    HardwareProfile, ModelMeta, UserPreference,
+    create_engine, Engine, EngineSelector, EngineType, GenerateRequest, HardwareProfile, ModelMeta,
+    UserPreference,
 };
 use error::NezumiError;
 use session::{InMemoryStore, SessionStore};
 use std::sync::Arc;
 
-pub use engines::{GenerateRequest as Request, ModelMeta as Meta, UserPreference as Preference, LoadConfig};
+pub use engines::{
+    GenerateRequest as Request, LoadConfig, ModelMeta as Meta, UserPreference as Preference,
+};
 pub use error::NezumiError as Error;
 
 pub struct Config {
@@ -22,7 +24,11 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { db_path: None, preference: UserPreference::Auto, system_prompt: None }
+        Self {
+            db_path: None,
+            preference: UserPreference::Auto,
+            system_prompt: None,
+        }
     }
 }
 
@@ -53,7 +59,11 @@ impl NezumiCore {
         Ok(Arc::new(InMemoryStore::new()))
     }
 
-    pub async fn load_model(&mut self, path: &str, config: engines::LoadConfig) -> Result<(), NezumiError> {
+    pub async fn load_model(
+        &mut self,
+        path: &str,
+        config: engines::LoadConfig,
+    ) -> Result<(), NezumiError> {
         let meta = ModelMeta::from_path(path);
         let hw = HardwareProfile::detect();
         let engine_type = EngineSelector::select(&meta, &hw, &self.preference);
@@ -85,10 +95,7 @@ impl NezumiCore {
 
         // システムプロンプト
         if let Some(ref sys) = self.system_prompt {
-            prompt.push_str(&format!(
-                "<start_of_turn>system\n{}<end_of_turn>\n",
-                sys
-            ));
+            prompt.push_str(&format!("<start_of_turn>system\n{}<end_of_turn>\n", sys));
         }
 
         // 履歴
