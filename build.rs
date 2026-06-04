@@ -88,20 +88,64 @@ fn build_litert() {
         return;
     }
 
-    // LiteRT-LM SDKビルド: LITERT_LM_ROOTが設定されている場合のみ
+    // LiteRT-LM SDKビルド: 必要な SDK ルートが設定されていない場合はスキップします.
     let litert_lm_root = env::var("LITERT_LM_ROOT");
-    
+    if litert_lm_root.is_err() {
+        println!("cargo:warning=LITERT_LM_ROOT not set; skipping LiteRT-LM wrapper build");
+        return;
+    }
+
+    let root = litert_lm_root.unwrap();
+    // If the Bazel execroot isn't provided, remind the user to run Bazel
+    // with UTF-8 copt flags. If LITERT_LM_AUTO_BAZEL is set, attempt
+    // to run Bazel automatically with the required flags.
+    if env::var("LITERT_LM_BAZEL_EXECROOT").is_err() {
+        println!("cargo:warning=LITERT_LM_BAZEL_EXECROOT not set; please run Bazel in the LiteRT-LM repo and set this to the execroot (e.g. C:\\bazel-cache\\<id>\\execroot\\litert_lm).\nRun example:\nbazel build //... --copt=/utf-8 --host_copt=/utf-8 --verbose_failures");
+
+        if env::var("LITERT_LM_AUTO_BAZEL").is_ok() {
+            let bazel_cmd = env::var("BAZEL").unwrap_or_else(|_| "bazel".to_string());
+            println!("cargo:warning=Attempting to run '{}' in {} (this may take a while)", bazel_cmd, root);
+            match std::process::Command::new(&bazel_cmd)
+                .current_dir(&root)
+                .arg("build")
+                .arg("//...")
+                .arg("--copt=/utf-8")
+                .arg("--host_copt=/utf-8")
+                .arg("--verbose_failures")
+                .output()
+            {
+                Ok(output) => {
+                    if !output.status.success() {
+                        println!("cargo:warning=Bazel build failed (exit {}). Stderr:\n{}", output.status, String::from_utf8_lossy(&output.stderr));
+                    } else {
+                        println!("cargo:warning=Bazel build completed successfully");
+                    }
+                }
+                Err(e) => {
+                    println!("cargo:warning=Failed to run bazel: {}", e);
+                }
+            }
+        }
+    }
     let mut cmake_config = cmake::Config::new(src);
     cmake_config
         .define("CMAKE_BUILD_TYPE", "Release")
-        .profile("Release");
+        .profile("Release")
+        .define("LITERT_LM_ROOT", &root);
 
-    if let Ok(root) = litert_lm_root {
-        cmake_config.define("LITERT_LM_ROOT", &root);
-        println!("cargo:rustc-link-search=native={}/lib", root);
-        println!("cargo:rustc-link-lib=litert_lm_main_lib");
+    if let Ok(bazel_execroot) = env::var("LITERT_LM_BAZEL_EXECROOT") {
+        cmake_config.define("LITERT_LM_BAZEL_EXECROOT", &bazel_execroot);
+        println!("cargo:warning=Using LITERT_LM_BAZEL_EXECROOT={}", bazel_execroot);
     }
 
+    println!("cargo:rustc-link-search=native={}/lib", root);
+    println!("cargo:rustc-link-lib=litert_lm_main_lib");
+
+    // Some CMake projects (like our litert wrapper) may not define an
+    // "install" target. Request a direct build of the wrapper target
+    // instead of relying on the default "install" target to avoid
+    // MSBuild errors when install.vcxproj is missing.
+    cmake_config.build_target("litert_wrapper");
     let dst = cmake_config.build();
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
