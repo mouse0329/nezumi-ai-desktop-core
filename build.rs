@@ -88,14 +88,19 @@ fn build_litert() {
         return;
     }
 
-    // LiteRT-LM SDKビルド: 必要な SDK ルートが設定されていない場合はスキップします.
-    let litert_lm_root = env::var("LITERT_LM_ROOT");
-    if litert_lm_root.is_err() {
-        println!("cargo:warning=LITERT_LM_ROOT not set; skipping LiteRT-LM wrapper build");
+    // LiteRT-LM SDKビルド: リポジトリ内のLiteRT-LMまたは環境変数から取得
+    let root = env::var("LITERT_LM_ROOT")
+        .unwrap_or_else(|_| {
+            // デフォルトではリポジトリ内のLiteRT-LMを使用
+            let workspace_root = env::var("CARGO_MANIFEST_DIR").unwrap();
+            format!("{}/LiteRT-LM", workspace_root)
+        });
+    
+    let root_path = Path::new(&root);
+    if !root_path.exists() {
+        println!("cargo:warning=LiteRT-LM root not found at {}; skipping LiteRT-LM wrapper build", root);
         return;
     }
-
-    let root = litert_lm_root.unwrap();
     // If the Bazel execroot isn't provided, remind the user to run Bazel
     // with UTF-8 copt flags. If LITERT_LM_AUTO_BAZEL is set, attempt
     // to run Bazel automatically with the required flags.
@@ -139,16 +144,34 @@ fn build_litert() {
     }
 
     println!("cargo:rustc-link-search=native={}/lib", root);
-    println!("cargo:rustc-link-lib=litert_lm_main_lib");
+    
+    // Link LiteRT-LM engine
+    if let Ok(bazel_execroot) = env::var("LITERT_LM_BAZEL_EXECROOT") {
+        // Use the Bazel-built link object library which includes all dependencies
+        let _engine_impl_lib = format!(
+            "{}/bazel-out/x64_windows-opt/bin/runtime/core/engine_advanced_impl_cpu_only.lo.lib",
+            bazel_execroot
+        );
+        println!("cargo:rustc-link-search=native={}/bazel-out/x64_windows-opt/bin/runtime/core", bazel_execroot);
+        println!("cargo:rustc-link-lib=static=engine_advanced_impl_cpu_only.lo");
+        
+        // Also add the base-level engine and cpp libraries
+        println!("cargo:rustc-link-search=native={}/bazel-out/x64_windows-opt/bin/c", bazel_execroot);
+        println!("cargo:rustc-link-lib=static=engine_cpu");
+    } else {
+        // Fallback to just engine_cpu if Bazel execroot not provided
+        println!("cargo:rustc-link-lib=engine_cpu");
+    }
 
     // Some CMake projects (like our litert wrapper) may not define an
     // "install" target. Request a direct build of the wrapper target
     // instead of relying on the default "install" target to avoid
     // MSBuild errors when install.vcxproj is missing.
+    cmake_config.out_dir(std::env::var("OUT_DIR").unwrap() + "/litert");
     cmake_config.build_target("litert_wrapper");
     let dst = cmake_config.build();
 
-    println!("cargo:rustc-link-search=native={}/build", dst.display());
+    println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
     println!("cargo:rustc-link-lib=static=litert_wrapper");
     println!("cargo:rerun-if-changed=native/litert_wrapper");
 }
@@ -169,3 +192,5 @@ fn apply_gpu_link(target: &str) {
         println!("cargo:rustc-link-lib=vulkan");
     }
 }
+
+

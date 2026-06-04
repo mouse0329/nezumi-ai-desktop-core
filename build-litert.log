@@ -1,0 +1,339 @@
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.24
+       Fresh version_check v0.9.5
+       Fresh shlex v1.3.0
+       Fresh find-msvc-tools v0.1.9
+       Fresh stable_deref_trait v1.2.1
+       Fresh typenum v1.20.0
+       Fresh smallvec v1.15.1
+       Fresh pkg-config v0.3.33
+       Fresh once_cell v1.21.4
+       Fresh windows-link v0.2.1
+       Fresh litemap v0.8.2
+       Fresh writeable v0.6.3
+       Fresh utf8_iter v1.0.4
+       Fresh memchr v2.8.0
+       Fresh subtle v2.6.1
+       Fresh cpufeatures v0.2.17
+       Fresh futures-core v0.3.32
+       Fresh percent-encoding v2.3.2
+       Fresh log v0.4.29
+       Fresh pin-project-lite v0.2.17
+       Fresh proc-macro2 v1.0.106
+       Fresh itoa v1.0.18
+       Fresh scopeguard v1.2.0
+       Fresh zeroize v1.8.2
+       Fresh quote v1.0.45
+       Fresh jobserver v0.1.34
+       Fresh generic-array v0.14.7
+       Fresh icu_properties_data v2.2.0
+       Fresh icu_normalizer_data v2.2.0
+       Fresh serde_core v1.0.228
+       Fresh zmij v1.0.21
+       Fresh lock_api v0.4.14
+       Fresh rustls-pki-types v1.14.1
+       Fresh syn v2.0.117
+       Fresh cc v1.2.62
+       Fresh block-buffer v0.10.4
+       Fresh serde_json v1.0.150
+       Fresh zerocopy v0.8.48
+       Fresh windows_x86_64_msvc v0.48.5
+       Fresh getrandom v0.2.17
+       Fresh futures-task v0.3.32
+       Fresh futures-io v0.3.32
+       Fresh slab v0.4.12
+       Fresh untrusted v0.9.0
+       Fresh autocfg v1.5.1
+       Fresh synstructure v0.13.2
+       Fresh zerovec-derive v0.11.3
+       Fresh displaydoc v0.2.5
+       Fresh serde_derive v1.0.228
+       Fresh windows-targets v0.48.5
+       Fresh libc v0.2.186
+       Fresh parking_lot_core v0.9.12
+       Fresh allocator-api2 v0.2.21
+       Fresh bytes v1.11.1
+       Fresh zerofrom-derive v0.1.7
+       Fresh yoke-derive v0.8.2
+       Fresh serde v1.0.228
+       Fresh windows-sys v0.48.0
+       Fresh parking_lot v0.12.5
+       Fresh webpki-roots v1.0.7
+       Fresh inout v0.1.4
+       Fresh simd-adler32 v0.3.9
+       Fresh adler2 v2.0.1
+       Fresh zerofrom v0.1.8
+       Fresh ring v0.17.14
+       Fresh zstd-sys v2.0.16+zstd.1.5.7
+       Fresh powerfmt v0.2.0
+       Fresh option-ext v0.2.0
+       Fresh base64ct v1.8.3
+       Fresh rand_core v0.6.4
+       Fresh cipher v0.4.4
+       Fresh miniz_oxide v0.8.9
+       Fresh crc32fast v1.5.0
+       Fresh webpki-roots v0.26.11
+       Fresh yoke v0.8.2
+       Fresh rustls-webpki v0.103.13
+       Fresh dirs-sys v0.4.1
+       Fresh zstd-safe v5.0.2+zstd.1.5.2
+       Fresh password-hash v0.4.2
+       Fresh deranged v0.5.8
+       Fresh bzip2-sys v0.1.13+1.0.8
+       Fresh hmac v0.12.1
+       Fresh thiserror-impl v1.0.69
+       Fresh windows-sys v0.61.2
+       Fresh time-core v0.1.8
+       Fresh minimal-lexical v0.2.1
+       Fresh base64 v0.22.1
+       Fresh zerovec v0.11.6
+       Fresh zerotrie v0.2.4
+       Fresh rustls v0.23.40
+       Fresh num-conv v0.2.2
+       Fresh pbkdf2 v0.11.0
+       Fresh zstd v0.11.2+zstd.1.5.2
+       Fresh crossbeam-utils v0.8.21
+       Fresh dirs v5.0.1
+       Fresh nom v7.1.3
+       Fresh thiserror v1.0.69
+       Fresh bzip2 v0.4.4
+       Fresh flate2 v1.1.9
+       Fresh num-traits v0.2.19
+       Fresh aes v0.8.4
+       Fresh tinystr v0.8.3
+       Fresh potential_utf v0.1.5
+       Fresh time v0.3.47
+       Fresh sha1 v0.10.6
+       Fresh tracing-attributes v0.1.31
+       Fresh tracing-core v0.1.36
+       Fresh constant_time_eq v0.1.5
+       Fresh equivalent v1.0.2
+       Fresh vcpkg v0.2.15
+       Fresh futures-sink v0.3.32
+       Fresh crc-catalog v2.5.0
+       Fresh unicode_categories v0.1.1
+       Fresh hashbrown v0.17.1
+       Fresh atoi v2.0.0
+       Fresh icu_locale_core v2.2.0
+       Fresh icu_collections v2.2.0
+       Fresh zip v0.6.6
+       Fresh crc v3.4.0
+       Fresh paste v1.0.15
+       Fresh tracing v0.1.44
+       Fresh sqlformat v0.2.6
+       Fresh indexmap v2.14.0
+       Fresh crossbeam-queue v0.3.12
+       Fresh either v1.16.0
+       Fresh futures-intrusive v0.5.0
+       Fresh icu_provider v2.2.0
+       Fresh spin v0.9.8
+       Fresh hex v0.4.3
+       Fresh event-listener v2.5.3
+       Fresh getrandom v0.3.4
+       Fresh futures-macro v0.3.32
+       Fresh futures-channel v0.3.32
+       Fresh mio v1.2.0
+       Fresh socket2 v0.6.3
+       Fresh icu_normalizer v2.2.0
+       Fresh icu_properties v2.2.0
+       Fresh futures-util v0.3.32
+       Fresh ahash v0.8.12
+       Fresh libsqlite3-sys v0.27.0
+       Fresh tokio-macros v2.7.0
+       Fresh crypto-common v0.1.7
+       Fresh urlencoding v2.1.3
+       Fresh schannel v0.1.29
+       Fresh idna_adapter v1.2.2
+       Fresh tokio v1.52.3
+       Fresh digest v0.10.7
+       Fresh getrandom v0.4.2
+       Fresh hashbrown v0.14.5
+       Fresh form_urlencoded v1.2.2
+       Fresh unicode-segmentation v1.13.2
+       Fresh fastrand v2.4.1
+       Fresh native-tls v0.2.18
+       Fresh futures-executor v0.3.32
+       Fresh dotenvy v0.15.7
+       Fresh byteorder v1.5.0
+       Fresh flume v0.11.1
+       Fresh cmake v0.1.58
+       Fresh idna v1.1.0
+       Fresh sha2 v0.10.9
+       Fresh tempfile v3.27.0
+       Fresh tokio-stream v0.1.18
+       Fresh syn v1.0.109
+       Fresh heck v0.4.1
+       Fresh hashlink v0.8.4
+       Dirty nezumi-ai-desktop-core v0.1.0 (C:\nezumi-ai-desktop-core): the file `build.rs` has changed (13425034933.243011500s, 9h 44m 2s after last build at 13424999891.636057700s)
+   Compiling nezumi-ai-desktop-core v0.1.0 (C:\nezumi-ai-desktop-core)
+       Fresh async-stream-impl v0.3.6
+       Fresh futures v0.3.32
+       Fresh async-trait v0.1.89
+       Fresh url v2.5.8
+       Fresh async-stream v0.3.6
+       Fresh ureq v2.12.1
+       Fresh sqlx-core v0.7.4
+       Fresh sqlx-sqlite v0.7.4
+     Running `C:\Users\mouse\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name build_script_build --edition=2021 build.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no --cfg "feature=\"default\"" --cfg "feature=\"litert\"" --cfg "feature=\"litertlm\"" --cfg "feature=\"session-sqlite\"" --cfg "feature=\"sqlx\"" --check-cfg cfg(docsrs,test) --check-cfg "cfg(feature, values(\"cuda\", \"default\", \"litert\", \"litertlm\", \"metal\", \"session-memory\", \"session-sqlite\", \"sqlx\", \"vulkan\"))" -C metadata=7c721ed66b725ce5 -C extra-filename=-b36a02386ecb4b60 --out-dir C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-b36a02386ecb4b60 -C incremental=C:\nezumi-ai-desktop-core\target\debug\incremental -L dependency=C:\nezumi-ai-desktop-core\target\debug\deps --extern cc=C:\nezumi-ai-desktop-core\target\debug\deps\libcc-c2ca76df59755606.rlib --extern cmake=C:\nezumi-ai-desktop-core\target\debug\deps\libcmake-904f909ddbaf584b.rlib`
+       Fresh sqlx-macros-core v0.7.4
+       Fresh litert-sys v0.2.1
+       Fresh sqlx-macros v0.7.4
+       Fresh litert-lm-sys v0.2.1
+       Fresh sqlx v0.7.4
+       Fresh litertlm v0.2.1
+     Running `C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-b36a02386ecb4b60\build-script-build`
+warning: nezumi-ai-desktop-core@0.1.0: Using LITERT_LM_BAZEL_EXECROOT=C:\bazel-cache\sb3ixf4b\execroot\litert_lm
+error: failed to run custom build command for `nezumi-ai-desktop-core v0.1.0 (C:\nezumi-ai-desktop-core)`
+
+Caused by:
+  process didn't exit successfully: `C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-b36a02386ecb4b60\build-script-build` (exit code: 101)
+  --- stdout
+  CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc = None
+  CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_GENERATOR_x86_64-pc-windows-msvc = None
+  CMAKE_GENERATOR_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_GENERATOR = None
+  CMAKE_GENERATOR = None
+  CMAKE_PREFIX_PATH_x86_64-pc-windows-msvc = None
+  CMAKE_PREFIX_PATH_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_PREFIX_PATH = None
+  CMAKE_PREFIX_PATH = None
+  CMAKE_x86_64-pc-windows-msvc = None
+  CMAKE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE = None
+  CMAKE = None
+  -- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+  -- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+  -- CMAKE_SYSTEM_PROCESSOR: AMD64
+  -- CMAKE_GENERATOR_PLATFORM: x64
+  -- GGML_SYSTEM_ARCH: x86
+  -- Including CPU backend
+  -- x86 detected
+  -- Adding CPU backend variant ggml-cpu: /arch:AVX2 GGML_AVX2;GGML_FMA;GGML_F16C
+  -- ggml version: 0.12.0
+  -- ggml commit:  b22ff4b7b
+  -- Configuring done (1.5s)
+  -- Generating done (1.4s)
+  -- Build files have been written to: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/build
+  MSBuild 縺ｮ繝舌・繧ｸ繝ｧ繝ｳ 18.0.5+e22287bf1 (.NET Framework)
+
+    1>Checking Build System
+    ggml-base.vcxproj -> C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\llama.cpp\ggml\src\Release\ggml-base.lib
+    ggml-cpu.vcxproj -> C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\llama.cpp\ggml\src\Release\ggml-cpu.lib
+    ggml.vcxproj -> C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\llama.cpp\ggml\src\Release\ggml.lib
+    llama.cpp
+    llama.vcxproj -> C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\llama.cpp\src\Release\llama.lib
+    Building Custom Rule C:/nezumi-ai-desktop-core/native/llama_wrapper/CMakeLists.txt
+    llama_wrapper.cpp
+    nezumi_llama_wrapper.vcxproj -> C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\Release\nezumi_llama_wrapper.lib
+    Building Custom Rule C:/nezumi-ai-desktop-core/native/llama_wrapper/CMakeLists.txt
+    1>
+    -- Install configuration: "Release"
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/ggml-cpu.lib
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/ggml.lib
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-cpu.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-alloc.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-backend.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-blas.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-cann.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-cpp.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-cuda.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-opt.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-metal.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-rpc.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-virtgpu.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-sycl.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-vulkan.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-webgpu.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-zendnn.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/ggml-openvino.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/gguf.h
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/ggml-base.lib
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/cmake/ggml/ggml-config.cmake
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/cmake/ggml/ggml-version.cmake
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/llama.lib
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/llama.h
+    -- Up-to-date: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/include/llama-cpp.h
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/cmake/llama/llama-config.cmake
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/cmake/llama/llama-version.cmake
+    -- Installing: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/lib/pkgconfig/llama.pc
+  cargo:root=C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out
+  cargo:rustc-link-search=native=C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out/build/Release
+  cargo:rustc-link-search=native=C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out/build/llama.cpp/src/Release
+  cargo:rustc-link-search=native=C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out/build/llama.cpp/ggml/src/Release
+  cargo:rustc-link-lib=static=nezumi_llama_wrapper
+  cargo:rustc-link-lib=static=llama
+  cargo:rustc-link-lib=static=ggml
+  cargo:rustc-link-lib=static=ggml-base
+  cargo:rustc-link-lib=static=ggml-cpu
+  cargo:rustc-link-lib=advapi32
+  cargo:rerun-if-changed=native/llama_wrapper
+  cargo:warning=Using LITERT_LM_BAZEL_EXECROOT=C:\bazel-cache\sb3ixf4b\execroot\litert_lm
+  cargo:rustc-link-search=native=C:\LiteRT-LM/lib
+  cargo:rustc-link-lib=litert_lm_main_lib
+  CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc = None
+  CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_GENERATOR_x86_64-pc-windows-msvc = None
+  CMAKE_GENERATOR_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_GENERATOR = None
+  CMAKE_GENERATOR = None
+  detected home dir change, cleaning out entire build directory
+  CMAKE_PREFIX_PATH_x86_64-pc-windows-msvc = None
+  CMAKE_PREFIX_PATH_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_PREFIX_PATH = None
+  CMAKE_PREFIX_PATH = None
+  CMAKE_x86_64-pc-windows-msvc = None
+  CMAKE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE = None
+  CMAKE = None
+  -- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+  -- The C compiler identification is MSVC 19.50.35723.0
+  -- The CXX compiler identification is MSVC 19.50.35723.0
+  -- Detecting C compiler ABI info
+  -- Detecting C compiler ABI info - done
+  -- Check for working C compiler: C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+  -- Detecting C compile features
+  -- Detecting C compile features - done
+  -- Detecting CXX compiler ABI info
+  -- Detecting CXX compiler ABI info - done
+  -- Check for working CXX compiler: C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+  -- Detecting CXX compile features
+  -- Detecting CXX compile features - done
+  -- Configuring done (7.0s)
+  -- Generating done (0.1s)
+  -- Build files have been written to: C:/nezumi-ai-desktop-core/target/debug/build/nezumi-ai-desktop-core-f4cbd49c897bf954/out/build
+  MSBuild 縺ｮ繝舌・繧ｸ繝ｧ繝ｳ 18.0.5+e22287bf1 (.NET Framework)
+
+    1>Checking Build System
+    Building Custom Rule C:/nezumi-ai-desktop-core/native/litert_wrapper/CMakeLists.txt
+    litert_wrapper.cpp
+  C:\LiteRT-LM\runtime\engine\engine.h(21,10): error C1083: include 繝輔ぃ繧､繝ｫ繧帝幕縺代∪縺帙ｓ縲・absl/functional/any_invocable.h':No such file or directory [C:\nezumi-ai-desktop-core\target\debug\build\nezumi-ai-desktop-core-f4cbd49c897bf954\out\build\litert_wrapper.vcxproj]
+    (compiling source file '../../../../../../native/litert_wrapper/litert_wrapper.cpp')
+    
+
+  --- stderr
+  running: "\\\\?\\C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe" "C:\\nezumi-ai-desktop-core\\native/llama_wrapper" "-B" "C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out\\build" "-G" "Visual Studio 18 2026" "-Thost=x64" "-Ax64" "-DCMAKE_BUILD_TYPE=Release" "-DBUILD_SHARED_LIBS=OFF" "-DLLAMA_BUILD_TESTS=OFF" "-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_SERVER=OFF" "-DCMAKE_INSTALL_PREFIX=C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out" "-DCMAKE_C_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_C_FLAGS_RELEASE= -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS= /EHsc -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS_RELEASE= /EHsc -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS_RELEASE= -nologo -MD -Brepro -W0"
+  CMAKE_BUILD_TYPE=Release
+  running: "\\\\?\\C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe" "--build" "C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out\\build" "--target" "install" "--config" "Release" "--parallel" "16"
+  running: "\\\\?\\C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe" "C:\\nezumi-ai-desktop-core\\native/litert_wrapper" "-B" "C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out\\build" "-G" "Visual Studio 18 2026" "-Thost=x64" "-Ax64" "-DCMAKE_BUILD_TYPE=Release" "-DLITERT_LM_ROOT=C:\\LiteRT-LM" "-DLITERT_LM_BAZEL_EXECROOT=C:\\bazel-cache\\sb3ixf4b\\execroot\\litert_lm" "-DCMAKE_INSTALL_PREFIX=C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out" "-DCMAKE_C_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_C_FLAGS_RELEASE= -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS_RELEASE= -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS_RELEASE= -nologo -MD -Brepro -W0"
+  CMake Warning:
+    Manually-specified variables were not used by the project:
+
+      CMAKE_ASM_FLAGS
+      CMAKE_ASM_FLAGS_RELEASE
+      CMAKE_BUILD_TYPE
+
+
+  running: "\\\\?\\C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe" "--build" "C:\\nezumi-ai-desktop-core\\target\\debug\\build\\nezumi-ai-desktop-core-f4cbd49c897bf954\\out\\build" "--target" "litert_wrapper" "--config" "Release" "--parallel" "16"
+
+  thread 'main' (24112) panicked at C:\Users\mouse\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\cmake-0.1.58\src\lib.rs:1132:5:
+
+  command did not execute successfully, got: exit code: 1
+
+  build script failed, must exit now
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

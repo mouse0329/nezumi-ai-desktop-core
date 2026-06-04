@@ -7,3 +7,6 @@
 # Example for macOS/Linux:
 # [env]
 # LITERT_LM_ROOT = "/path/to/LiteRT-LM"
+
+[env]
+LITERT_LM_ROOT = "C:/LiteRT-LM"

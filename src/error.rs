@@ -14,6 +14,8 @@ pub enum NezumiError {
     ModelNotLoaded,
     #[error("ffi error: {0}")]
     FfiError(String),
+    #[error("generation failed: {0}")]
+    GenerationFailed(String),
     #[cfg(feature = "session-sqlite")]
     #[error("db error: {0}")]
     Db(#[from] sqlx::Error),
@@ -29,6 +31,7 @@ pub fn to_ffi_code(r: &Result<(), NezumiError>) -> i32 {
         Err(NezumiError::InferenceError(_)) => -4,
         Err(NezumiError::ModelNotLoaded) => -5,
         Err(NezumiError::FfiError(_)) => -6,
+        Err(NezumiError::GenerationFailed(_)) => -8,
         #[cfg(feature = "session-sqlite")]
         Err(NezumiError::Db(_)) => -7,
     }
