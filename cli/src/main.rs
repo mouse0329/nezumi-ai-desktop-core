@@ -251,10 +251,9 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
         if input.is_empty() {
             continue;
         }
-        core.session.add("user", input).await?;
         print!("ai>  ");
         io::stdout().flush()?;
-        let mut stream = core.chat(input).await?;
+        let mut stream = core.chat_and_save(input).await?;
         let mut buffer = String::new();
         'chat: while let Some(token) = stream.next().await {
             buffer.push_str(&token);

@@ -85,33 +85,41 @@ impl NezumiCore {
     }
 
     /// チャット形式で生成（履歴+Gemma3テンプレート）
-    pub async fn chat(
+    fn build_chat_prompt(
         &self,
+        history: &[crate::session::Message],
         user_input: &str,
-    ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
-        let history = self.session.history().await?;
-
+        include_current_input: bool,
+    ) -> String {
         let mut prompt = String::new();
 
-        // システムプロンプト
         if let Some(ref sys) = self.system_prompt {
             prompt.push_str(&format!("<start_of_turn>system\n{}<end_of_turn>\n", sys));
         }
 
-        // 履歴
-        for msg in &history {
+        for msg in history {
             prompt.push_str(&format!(
                 "<start_of_turn>{}\n{}<end_of_turn>\n",
                 msg.role, msg.content
             ));
         }
 
-        // 今回のユーザー入力
-        prompt.push_str(&format!(
-            "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
-            user_input
-        ));
+        if include_current_input {
+            prompt.push_str(&format!(
+                "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
+                user_input
+            ));
+        }
 
+        prompt
+    }
+
+    pub async fn chat(
+        &self,
+        user_input: &str,
+    ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
+        let history = self.session.history().await?;
+        let prompt = self.build_chat_prompt(&history, user_input, true);
         self.engine.generate(GenerateRequest::new(prompt)).await
     }
 
@@ -121,6 +129,8 @@ impl NezumiCore {
         user_input: &str,
     ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
         self.session.add("user", user_input).await?;
-        self.chat(user_input).await
+        let history = self.session.history().await?;
+        let prompt = self.build_chat_prompt(&history, user_input, false);
+        self.engine.generate(GenerateRequest::new(prompt)).await
     }
 }
