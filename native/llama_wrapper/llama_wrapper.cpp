@@ -43,6 +43,22 @@ static size_t find_stop_pos(const std::string &text, size_t start_pos)
     return best;
 }
 
+static constexpr size_t STOP_LOOKBEHIND = 32;
+
+static size_t utf8_truncate_to_boundary(const std::string &text, size_t max_len)
+{
+    if (max_len >= text.size())
+    {
+        return text.size();
+    }
+
+    while (max_len > 0 && (static_cast<unsigned char>(text[max_len]) & 0xC0) == 0x80)
+    {
+        --max_len;
+    }
+    return max_len;
+}
+
 static bool reset_llama_context(NezumiLlamaState *state)
 {
     if (state->ctx)
@@ -59,7 +75,7 @@ static bool reset_llama_context(NezumiLlamaState *state)
     return state->ctx != nullptr;
 }
 
-NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers, NezumiProgressCallback progress_cb, void *progress_user_data)
+extern "C" NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers, NezumiProgressCallback progress_cb, void *progress_user_data)
 {
     llama_log_set(dummy_log_callback, nullptr);
     llama_backend_init();
@@ -105,7 +121,7 @@ NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32
     return state;
 }
 
-int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t max_tokens, float temperature, NezumiTokenCallback cb, void *user_data)
+extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t max_tokens, float temperature, NezumiTokenCallback cb, void *user_data)
 {
     if (!state)
         return -1;
@@ -155,6 +171,7 @@ int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t m
     std::string generated;
     generated.reserve(1024);
     size_t emitted_len = 0;
+    bool stopped = false;
 
     for (int32_t i = 0; i < limit; ++i)
     {
@@ -172,34 +189,53 @@ int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t m
 
         generated.append(piece_buf, static_cast<size_t>(piece_len));
 
-        size_t stop_pos = find_stop_pos(generated, emitted_len);
+        size_t search_start = emitted_len > STOP_LOOKBEHIND ? emitted_len - STOP_LOOKBEHIND : 0;
+        size_t stop_pos = find_stop_pos(generated, search_start);
         if (stop_pos != std::string::npos)
         {
             if (stop_pos > emitted_len)
             {
-                std::string out = generated.substr(emitted_len, stop_pos - emitted_len);
-                if (cb && cb(out.c_str(), user_data) != 0)
-                    break;
+                size_t safe_pos = utf8_truncate_to_boundary(generated, stop_pos);
+                if (safe_pos > emitted_len)
+                {
+                    std::string out = generated.substr(emitted_len, safe_pos - emitted_len);
+                    if (cb && cb(out.c_str(), user_data) != 0)
+                        break;
+                }
             }
+            stopped = true;
             break;
         }
 
-        if (generated.size() > emitted_len)
+        size_t safe_len = generated.size() > STOP_LOOKBEHIND ? generated.size() - STOP_LOOKBEHIND : 0;
+        safe_len = utf8_truncate_to_boundary(generated, safe_len);
+        if (safe_len > emitted_len)
         {
-            std::string out = generated.substr(emitted_len);
+            std::string out = generated.substr(emitted_len, safe_len - emitted_len);
             if (cb && cb(out.c_str(), user_data) != 0)
                 break;
-            emitted_len = generated.size();
+            emitted_len = safe_len;
         }
 
-        llama_batch next = llama_batch_get_one(&token_id, 1);
-        if (llama_decode(state->ctx, next) != 0)
-            break;
-    }
-    return 0;
-}
+            llama_batch next = llama_batch_get_one(&token_id, 1);
+            if (llama_decode(state->ctx, next) != 0)
+                break;
+        }
 
-void nezumi_llama_free(NezumiLlamaState *state)
+        if (!stopped && generated.size() > emitted_len)
+        {
+            size_t final_len = utf8_truncate_to_boundary(generated, generated.size());
+            if (final_len > emitted_len)
+            {
+                std::string out = generated.substr(emitted_len, final_len - emitted_len);
+                if (cb)
+                    cb(out.c_str(), user_data);
+            }
+        }
+        return 0;
+    }
+
+extern "C" void nezumi_llama_free(NezumiLlamaState *state)
 {
     if (!state)
         return;
