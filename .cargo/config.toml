@@ -9,4 +9,5 @@
 # LITERT_LM_ROOT = "/path/to/LiteRT-LM"
 
 [env]
-LITERT_LM_ROOT = "C:/LiteRT-LM"
+LITERT_LM_ROOT = "C:/nezumi-ai-desktop-core/LiteRT-LM"
+LITERT_LM_MAIN = "C:/bzl/execroot/litert_lm/bazel-out/x64_windows-opt/bin/runtime/engine/litert_lm_main.exe"

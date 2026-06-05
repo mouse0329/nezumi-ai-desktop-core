@@ -1,11 +1,37 @@
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let target = env::var("TARGET").unwrap_or_default();
 
     build_llama(&target);
-    build_litert();
+    if env::var("CARGO_FEATURE_LITERT").is_ok() {
+        configure_litert_runtime();
+    }
+}
+
+fn litert_lm_root() -> PathBuf {
+    if let Ok(root) = env::var("LITERT_LM_ROOT") {
+        return PathBuf::from(root);
+    }
+    let manifest = env::var("CARGO_MANIFEST_DIR").unwrap();
+    PathBuf::from(manifest).join("LiteRT-LM")
+}
+
+fn detect_bazel_execroot(litert_root: &Path) -> Option<PathBuf> {
+    if let Ok(execroot) = env::var("LITERT_LM_BAZEL_EXECROOT") {
+        let p = PathBuf::from(execroot);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    for name in ["bazel-LiteRT-LM", "bazel-litert-lm", "bazel-LiteRT-lm"] {
+        let candidate = litert_root.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn build_llama(target: &str) {
@@ -67,7 +93,6 @@ fn build_llama(target: &str) {
     if target.contains("apple") {
         println!("cargo:rustc-link-lib=c++");
     } else if target.contains("windows") {
-        // MSVC は自動リンク
         println!("cargo:rustc-link-lib=advapi32");
     } else {
         println!("cargo:rustc-link-lib=stdc++");
@@ -76,104 +101,59 @@ fn build_llama(target: &str) {
     println!("cargo:rerun-if-changed=native/llama_wrapper");
 }
 
-fn build_litert() {
-    let src = Path::new("native/litert_wrapper");
-    if !src.join("CMakeLists.txt").exists() {
-        if src.join("litert_wrapper.cpp").exists() {
-            cc::Build::new()
-                .cpp(true)
-                .file(src.join("litert_wrapper.cpp"))
-                .compile("litert_wrapper");
-        }
-        return;
-    }
-
-    // LiteRT-LM SDKビルド: リポジトリ内のLiteRT-LMまたは環境変数から取得
-    let root = env::var("LITERT_LM_ROOT")
-        .unwrap_or_else(|_| {
-            // デフォルトではリポジトリ内のLiteRT-LMを使用
-            let workspace_root = env::var("CARGO_MANIFEST_DIR").unwrap();
-            format!("{}/LiteRT-LM", workspace_root)
-        });
-    
-    let root_path = Path::new(&root);
-    if !root_path.exists() {
-        println!("cargo:warning=LiteRT-LM root not found at {}; skipping LiteRT-LM wrapper build", root);
-        return;
-    }
-    // If the Bazel execroot isn't provided, remind the user to run Bazel
-    // with UTF-8 copt flags. If LITERT_LM_AUTO_BAZEL is set, attempt
-    // to run Bazel automatically with the required flags.
-    if env::var("LITERT_LM_BAZEL_EXECROOT").is_err() {
-        println!("cargo:warning=LITERT_LM_BAZEL_EXECROOT not set; please run Bazel in the LiteRT-LM repo and set this to the execroot (e.g. C:\\bazel-cache\\<id>\\execroot\\litert_lm).\nRun example:\nbazel build //... --copt=/utf-8 --host_copt=/utf-8 --verbose_failures");
-
-        if env::var("LITERT_LM_AUTO_BAZEL").is_ok() {
-            let bazel_cmd = env::var("BAZEL").unwrap_or_else(|_| "bazel".to_string());
-            println!("cargo:warning=Attempting to run '{}' in {} (this may take a while)", bazel_cmd, root);
-            match std::process::Command::new(&bazel_cmd)
-                .current_dir(&root)
-                .arg("build")
-                .arg("//...")
-                .arg("--copt=/utf-8")
-                .arg("--host_copt=/utf-8")
-                .arg("--verbose_failures")
-                .output()
-            {
-                Ok(output) => {
-                    if !output.status.success() {
-                        println!("cargo:warning=Bazel build failed (exit {}). Stderr:\n{}", output.status, String::from_utf8_lossy(&output.stderr));
-                    } else {
-                        println!("cargo:warning=Bazel build completed successfully");
-                    }
-                }
-                Err(e) => {
-                    println!("cargo:warning=Failed to run bazel: {}", e);
-                }
-            }
-        }
-    }
-    let mut cmake_config = cmake::Config::new(src);
-    cmake_config
-        .define("CMAKE_BUILD_TYPE", "Release")
-        .profile("Release")
-        .define("LITERT_LM_ROOT", &root);
-
-    if let Ok(bazel_execroot) = env::var("LITERT_LM_BAZEL_EXECROOT") {
-        cmake_config.define("LITERT_LM_BAZEL_EXECROOT", &bazel_execroot);
-        println!("cargo:warning=Using LITERT_LM_BAZEL_EXECROOT={}", bazel_execroot);
-    }
-
-    println!("cargo:rustc-link-search=native={}/lib", root);
-    
-    // Link LiteRT-LM engine
-    if let Ok(bazel_execroot) = env::var("LITERT_LM_BAZEL_EXECROOT") {
-        // Use the Bazel-built link object library which includes all dependencies
-        let _engine_impl_lib = format!(
-            "{}/bazel-out/x64_windows-opt/bin/runtime/core/engine_advanced_impl_cpu_only.lo.lib",
-            bazel_execroot
+fn configure_litert_runtime() {
+    let root = litert_lm_root();
+    if !root.exists() {
+        println!(
+            "cargo:warning=LiteRT-LM not found at {}; clone into LiteRT-LM/ or set LITERT_LM_ROOT",
+            root.display()
         );
-        println!("cargo:rustc-link-search=native={}/bazel-out/x64_windows-opt/bin/runtime/core", bazel_execroot);
-        println!("cargo:rustc-link-lib=static=engine_advanced_impl_cpu_only.lo");
-        
-        // Also add the base-level engine and cpp libraries
-        println!("cargo:rustc-link-search=native={}/bazel-out/x64_windows-opt/bin/c", bazel_execroot);
-        println!("cargo:rustc-link-lib=static=engine_cpu");
-    } else {
-        // Fallback to just engine_cpu if Bazel execroot not provided
-        println!("cargo:rustc-link-lib=engine_cpu");
+        return;
     }
 
-    // Some CMake projects (like our litert wrapper) may not define an
-    // "install" target. Request a direct build of the wrapper target
-    // instead of relying on the default "install" target to avoid
-    // MSBuild errors when install.vcxproj is missing.
-    cmake_config.out_dir(std::env::var("OUT_DIR").unwrap() + "/litert");
-    cmake_config.build_target("litert_wrapper");
-    let dst = cmake_config.build();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = env::var("LITERT_LM_MAIN") {
+        candidates.push(PathBuf::from(p));
+    }
+    candidates.push(root.join("bazel-bin/runtime/engine/litert_lm_main.exe"));
+    if let Some(er) = detect_bazel_execroot(&root) {
+        candidates.push(
+            er.join("bazel-out/x64_windows-opt/bin/runtime/engine/litert_lm_main.exe"),
+        );
+    }
+    // Bazel --output_base=C:/bzl (see README)
+    candidates.push(PathBuf::from(
+        "C:/bzl/execroot/litert_lm/bazel-out/x64_windows-opt/bin/runtime/engine/litert_lm_main.exe",
+    ));
 
-    println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
-    println!("cargo:rustc-link-lib=static=litert_wrapper");
-    println!("cargo:rerun-if-changed=native/litert_wrapper");
+    let mut found = false;
+    for candidate in candidates {
+        if candidate.exists() {
+            println!(
+                "cargo:rustc-env=LITERT_LM_MAIN={}",
+                candidate.to_string_lossy()
+            );
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        println!(
+            "cargo:warning=litert_lm_main.exe not found. Run scripts/build-litert-lm.ps1 or set LITERT_LM_MAIN."
+        );
+    }
+
+    let prebuilt = root.join("prebuilt/windows_x86_64");
+    if prebuilt.exists() {
+        println!(
+            "cargo:rustc-env=LITERT_LM_RUNTIME_DIR={}",
+            prebuilt.to_string_lossy()
+        );
+    }
+
+    println!("cargo:rerun-if-env-changed=LITERT_LM_ROOT");
+    println!("cargo:rerun-if-env-changed=LITERT_LM_MAIN");
+    println!("cargo:rerun-if-env-changed=LITERT_LM_RUNTIME_DIR");
 }
 
 fn apply_gpu_link(target: &str) {
@@ -192,5 +172,3 @@ fn apply_gpu_link(target: &str) {
         println!("cargo:rustc-link-lib=vulkan");
     }
 }
-
-

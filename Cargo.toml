@@ -12,7 +12,7 @@ name = "nezumi_ai_core"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["session-sqlite"]
+default = ["session-sqlite", "litert"]
 session-memory = []
 session-sqlite = ["sqlx"]
 litert = []

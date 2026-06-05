@@ -67,20 +67,61 @@ nezumi-ai-desktop-core/
 
 ---
 
+## LiteRT-LM で推論する
+
+LiteRT-LM は `.litertlm` モデルを CPU で実行します。コアは `litert_lm_main` をサブプロセスとして起動します（Bazel の巨大な静的リンクを避けるため）。
+
+### 1. LiteRT-LM をビルド（初回のみ）
+
+リポジトリ直下の `LiteRT-LM/` を使います。Windows では **ユーザーディレクトリに空白があると Bazel が失敗**するため、`output_user_root` を短いパスに指定してください。
+
+```powershell
+cd LiteRT-LM
+# Git Bash のパス（Bazel が genrule で使用）
+$bash = "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe"
+bazelisk --output_user_root=C:/bzl-user --output_base=C:/bzl build //runtime/engine:litert_lm_main --config=windows --shell_executable=$bash
+```
+
+ビルド後、実行ファイルの例:
+
+`C:/bzl/execroot/litert_lm/bazel-out/x64_windows-opt/bin/runtime/engine/litert_lm_main.exe`
+
+### 2. nezumi をビルド
+
+```powershell
+cargo build --features litert
+cargo build -p nezumi-ai-cli
+```
+
+`.cargo/config.toml` の `LITERT_LM_ROOT` が `LiteRT-LM` を指していることを確認してください。実行ファイルを別の場所に置いた場合は `LITERT_LM_MAIN` を設定します。
+
+### 3. 推論
+
+```powershell
+# テスト用モデル（リポジトリ内）
+$model = "LiteRT-LM/runtime/testdata/test_lm.litertlm"
+
+cargo run --bin nezumiai -p nezumi-ai-cli -- import $model --name my-litert
+cargo run --bin nezumiai -p nezumi-ai-cli -- run my-litert
+```
+
+`.litertlm` / `.tflite` をロードするとエンジンセレクタが LiteRT を選びます。本番用モデルは [LiteRT-LM の Supported Models](https://github.com/google-ai-edge/LiteRT-LM) から取得してください。
+
+---
+
 ## ライブラリの利用例 (Rust)
 
 ```rust
-use nezumi_ai_core::{NezumiCore, EngineType, Config};
+use futures::StreamExt;
+use nezumi_ai_core::{Config, LoadConfig, NezumiCore};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // コアの初期化
-    let core = NezumiCore::init(Config::default()).await?;
+    let mut core = NezumiCore::init(Config::default()).await?;
 
-    // モデルのロード (GGUF なら llama.cpp, TFLite なら LiteRT が自動選択される)
-    core.load_model("path/to/gemma-3n-e4b.gguf").await?;
+    // GGUF → llama.cpp、.litertlm → LiteRT-LM が自動選択される
+    core.load_model("path/to/model.litertlm", LoadConfig::default()).await?;
 
-    // ストリーミング推論
     let mut stream = core.generate("こんにちは、自己紹介して。").await?;
     while let Some(token) = stream.next().await {
         print!("{}", token);

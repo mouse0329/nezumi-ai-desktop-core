@@ -1,5 +1,5 @@
 #include "litert_wrapper.h"
-#include "c/engine.h"
+#include "engine.h"
 
 #include <cstring>
 #include <mutex>

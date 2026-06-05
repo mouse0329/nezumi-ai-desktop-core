@@ -248,15 +248,10 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let input = input.trim();
-<<<<<<< HEAD
-        if input.is_empty() { continue; }
-        // save user message before generating so history includes it
-        core.session.add("user", input).await?;
-=======
         if input.is_empty() {
             continue;
         }
->>>>>>> d49bce63411031192a6e3ac36620b494bc4d5d06
+        core.session.add("user", input).await?;
         print!("ai>  ");
         io::stdout().flush()?;
         let mut stream = core.chat(input).await?;

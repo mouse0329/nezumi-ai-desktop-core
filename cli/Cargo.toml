@@ -12,6 +12,8 @@ name = "nezumiai-tui"
 path = "src/tui.rs"
 
 [features]
+default = ["litert"]
+litert = ["nezumi-ai-desktop-core/litert"]
 cuda   = ["nezumi-ai-desktop-core/cuda"]
 vulkan = ["nezumi-ai-desktop-core/vulkan"]
 
