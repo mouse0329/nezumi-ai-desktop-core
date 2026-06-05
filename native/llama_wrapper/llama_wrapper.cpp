@@ -10,9 +10,11 @@ struct NezumiLlamaState
     llama_context *ctx = nullptr;
     llama_sampler *sampler = nullptr;
     const llama_vocab *vocab = nullptr;
+    int32_t n_ctx = 2048;
+    std::string last_prompt;
 };
 
-// ÉçÉOÇäÆëSÇ…ñŸÇÁÇπÇÈ
+// ÔøΩÔøΩÔøΩOÔøΩÔøΩÔøΩÔøΩÔøΩSÔøΩ…ñŸÇÁÇπÔøΩÔøΩ
 void dummy_log_callback(ggml_log_level level, const char *text, void *user_data)
 {
     (void)level;
@@ -25,10 +27,8 @@ static size_t find_stop_pos(const std::string &text, size_t start_pos)
     static const char *const stop_patterns[] = {
         "<end_of_turn>",
         "<start_of_turn>",
-        "\n\n",
-        "```",
-        "you>",
-        "You>",
+        "<|im_end|>",
+        "<|im_start|>",
     };
 
     size_t best = std::string::npos;
@@ -43,6 +43,22 @@ static size_t find_stop_pos(const std::string &text, size_t start_pos)
     return best;
 }
 
+static bool reset_llama_context(NezumiLlamaState *state)
+{
+    if (state->ctx)
+    {
+        llama_free(state->ctx);
+        state->ctx = nullptr;
+    }
+
+    auto cparams = llama_context_default_params();
+    cparams.n_ctx = static_cast<uint32_t>(state->n_ctx > 0 ? state->n_ctx : 2048);
+    cparams.n_batch = 512;
+
+    state->ctx = llama_init_from_model(state->model, cparams);
+    return state->ctx != nullptr;
+}
+
 NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers, NezumiProgressCallback progress_cb, void *progress_user_data)
 {
     llama_log_set(dummy_log_callback, nullptr);
@@ -50,8 +66,10 @@ NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32
 
     auto mparams = llama_model_default_params();
     mparams.n_gpu_layers = n_gpu_layers;
-    if (progress_cb) {
-        mparams.progress_callback = [](float progress, void *ctx) -> bool {
+    if (progress_cb)
+    {
+        mparams.progress_callback = [](float progress, void *ctx) -> bool
+        {
             auto *cb = reinterpret_cast<NezumiProgressCallback>(ctx);
             cb(progress, nullptr);
             return true;
@@ -63,14 +81,15 @@ NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32
     if (!model)
         return nullptr;
 
-    auto cparams = llama_context_default_params();
-    cparams.n_ctx = static_cast<uint32_t>(n_ctx > 0 ? n_ctx : 2048);
-    cparams.n_batch = 512;
+    auto *state = new NezumiLlamaState();
+    state->model = model;
+    state->vocab = llama_model_get_vocab(model);
+    state->n_ctx = n_ctx > 0 ? n_ctx : 2048;
 
-    llama_context *ctx = llama_init_from_model(model, cparams);
-    if (!ctx)
+    if (!reset_llama_context(state))
     {
         llama_model_free(model);
+        delete state;
         return nullptr;
     }
 
@@ -82,37 +101,54 @@ NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32
     llama_sampler_chain_add(sampler, llama_sampler_init_penalties(-1, 1.18f, 0.2f, 0.3f));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
-    auto *state = new NezumiLlamaState();
-    state->model = model;
-    state->ctx = ctx;
     state->sampler = sampler;
-    state->vocab = llama_model_get_vocab(model);
     return state;
 }
 
 int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t max_tokens, float temperature, NezumiTokenCallback cb, void *user_data)
 {
-    if (!state || !state->ctx)
+    if (!state)
         return -1;
     const llama_vocab *vocab = state->vocab;
 
-    const int prompt_len = static_cast<int>(strlen(prompt));
-    std::vector<llama_token> tokens(prompt_len + 16);
-    int n_tokens = llama_tokenize(vocab, prompt, prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
-    if (n_tokens < 0)
+    std::string prompt_str(prompt ? prompt : "");
+    std::string input_to_decode;
+    if (!state->last_prompt.empty() && prompt_str.rfind(state->last_prompt, 0) == 0)
     {
-        tokens.resize(static_cast<size_t>(-n_tokens));
-        n_tokens = llama_tokenize(vocab, prompt, prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
+        input_to_decode = prompt_str.substr(state->last_prompt.size());
     }
-    if (n_tokens < 0)
-        return -2;
-    tokens.resize(static_cast<size_t>(n_tokens));
+    else
+    {
+        if (!state->last_prompt.empty())
+        {
+            if (!reset_llama_context(state))
+                return -4;
+        }
+        input_to_decode = prompt_str;
+    }
 
     llama_sampler_reset(state->sampler);
 
-    llama_batch batch = llama_batch_get_one(tokens.data(), static_cast<int32_t>(tokens.size()));
-    if (llama_decode(state->ctx, batch) != 0)
-        return -3;
+    if (!input_to_decode.empty())
+    {
+        const int prompt_len = static_cast<int>(input_to_decode.size());
+        std::vector<llama_token> tokens(prompt_len + 16);
+        int n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
+        if (n_tokens < 0)
+        {
+            tokens.resize(static_cast<size_t>(-n_tokens));
+            n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
+        }
+        if (n_tokens < 0)
+            return -2;
+        tokens.resize(static_cast<size_t>(n_tokens));
+
+        llama_batch batch = llama_batch_get_one(tokens.data(), static_cast<int32_t>(tokens.size()));
+        if (llama_decode(state->ctx, batch) != 0)
+            return -3;
+    }
+
+    state->last_prompt = std::move(prompt_str);
 
     const int32_t limit = max_tokens > 0 ? max_tokens : 512;
     char piece_buf[256];
@@ -125,7 +161,7 @@ int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t m
         llama_token token_id = llama_sampler_sample(state->sampler, state->ctx, -1);
         llama_sampler_accept(state->sampler, token_id);
 
-        // èIóπîªíË
+        // ÔøΩIÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ
         if (llama_vocab_is_eog(vocab, token_id))
             break;
 

@@ -39,7 +39,7 @@ target_include_directories(nezumi_llama_wrapper PUBLIC
 
 # cmake-rs は MSVC で /EHsc を渡さないため、ターゲットスコープで明示付与
 target_compile_options(nezumi_llama_wrapper PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/EHsc>
+    $<$<CXX_COMPILER_ID:MSVC>:/EHsc /utf-8>
 )
 
 target_link_libraries(nezumi_llama_wrapper PRIVATE llama)

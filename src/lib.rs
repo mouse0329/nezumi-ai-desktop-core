@@ -8,8 +8,9 @@ use engines::{
     UserPreference,
 };
 use error::NezumiError;
+use futures::{Stream, StreamExt};
 use session::{InMemoryStore, SessionStore};
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 
 pub use engines::{
     GenerateRequest as Request, LoadConfig, ModelMeta as Meta, UserPreference as Preference,
@@ -127,10 +128,21 @@ impl NezumiCore {
     pub async fn chat_and_save(
         &mut self,
         user_input: &str,
-    ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
         self.session.add("user", user_input).await?;
         let history = self.session.history().await?;
-        let prompt = self.build_chat_prompt(&history, user_input, false);
-        self.engine.generate(GenerateRequest::new(prompt)).await
+        let mut prompt = self.build_chat_prompt(&history, user_input, false);
+        prompt.push_str("<start_of_turn>model\n");
+        let mut inner = self.engine.generate(GenerateRequest::new(prompt)).await?;
+        let session = Arc::clone(&self.session);
+
+        Ok(Box::pin(async_stream::stream! {
+            let mut assistant_output = String::new();
+            while let Some(token) = inner.next().await {
+                assistant_output.push_str(&token);
+                yield token;
+            }
+            let _ = session.add("model", &assistant_output).await;
+        }))
     }
 }

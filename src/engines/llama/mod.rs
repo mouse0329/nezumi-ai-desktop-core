@@ -46,6 +46,7 @@ extern "C" {
 
 pub struct LlamaEngine {
     state: Mutex<*mut NezumiLlamaState>,
+    model_path: Mutex<Option<String>>,
 }
 
 unsafe impl Send for LlamaEngine {}
@@ -55,7 +56,48 @@ impl LlamaEngine {
     pub fn new() -> Self {
         Self {
             state: Mutex::new(std::ptr::null_mut()),
+            model_path: Mutex::new(None),
         }
+    }
+}
+
+fn prompt_for_model(prompt: &str, model_path: Option<&str>) -> String {
+    let is_qwen = model_path
+        .map(|path| path.to_lowercase().contains("qwen"))
+        .unwrap_or(false);
+
+    if !is_qwen {
+        return prompt.to_string();
+    }
+
+    prompt
+        .replace("<start_of_turn>system\n", "<|im_start|>system\n")
+        .replace("<start_of_turn>user\n", "<|im_start|>user\n")
+        .replace("<start_of_turn>model\n", "<|im_start|>assistant\n")
+        .replace("<end_of_turn>\n", "<|im_end|>\n")
+        .replace("<end_of_turn>", "<|im_end|>")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prompt_for_model;
+
+    #[test]
+    fn qwen_prompt_uses_chatml_roles() {
+        let prompt = "<start_of_turn>user\nhi<end_of_turn>\n<start_of_turn>model\n";
+        let formatted = prompt_for_model(prompt, Some("Qwen3.5-4B-Q4_K_M.gguf"));
+
+        assert_eq!(
+            formatted,
+            "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
+
+    #[test]
+    fn non_qwen_prompt_keeps_existing_template() {
+        let prompt = "<start_of_turn>user\nhi<end_of_turn>\n<start_of_turn>model\n";
+
+        assert_eq!(prompt_for_model(prompt, Some("gemma-3.gguf")), prompt);
     }
 }
 
@@ -109,6 +151,7 @@ impl Engine for LlamaEngine {
             unsafe { nezumi_llama_free(*guard) };
         }
         *guard = ptr;
+        *self.model_path.lock().unwrap() = Some(path.to_string());
         Ok(())
     }
 
@@ -121,30 +164,66 @@ impl Engine for LlamaEngine {
             return Err(NezumiError::ModelNotLoaded);
         }
 
-        let cprompt = CString::new(req.prompt.clone())
+        let model_path = self.model_path.lock().unwrap().clone();
+        let prompt = prompt_for_model(&req.prompt, model_path.as_deref());
+        let cprompt = CString::new(prompt)
             .map_err(|_| NezumiError::InferenceError("invalid prompt".into()))?;
         let max_tokens = req.max_tokens.unwrap_or(512) as i32;
         let temperature = req.temperature.unwrap_or(0.8);
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
+        struct CallbackState {
+            tx: tokio::sync::mpsc::UnboundedSender<String>,
+            pending: String,
+            started: bool,
+            ended: bool,
+        }
+
         unsafe extern "C" fn token_cb(token: *const c_char, user_data: *mut c_void) -> c_int {
-            let tx = &*(user_data as *const tokio::sync::mpsc::UnboundedSender<String>);
-            let s = CStr::from_ptr(token).to_string_lossy().into_owned();
-            if tx.send(s).is_err() {
-                1
-            } else {
-                0
+            let state = &mut *(user_data as *mut CallbackState);
+            if state.ended {
+                return 0;
             }
+
+            let s = CStr::from_ptr(token).to_string_lossy();
+            state.pending.push_str(&s);
+
+            const PREFIX: &str = "assistant\n";
+            if !state.started {
+                if state.pending.len() < PREFIX.len() && PREFIX.starts_with(&state.pending) {
+                    return 0;
+                }
+
+                if state.pending.starts_with(PREFIX) {
+                    state.pending.drain(..PREFIX.len());
+                }
+
+                state.started = true;
+            }
+
+            if !state.pending.is_empty() {
+                if state.tx.send(state.pending.clone()).is_err() {
+                    return 1;
+                }
+            }
+            state.pending.clear();
+            0
         }
 
         let state_addr = ptr as usize;
-        let tx_addr = Box::into_raw(Box::new(tx)) as usize;
+        let cb_state = CallbackState {
+            tx,
+            pending: String::new(),
+            started: false,
+            ended: false,
+        };
+        let cb_state_addr = Box::into_raw(Box::new(cb_state)) as usize;
         let prompt_bytes = cprompt.into_bytes_with_nul();
 
         tokio::task::spawn_blocking(move || {
             let state_ptr = state_addr as *mut NezumiLlamaState;
-            let tx_ptr = tx_addr as *mut tokio::sync::mpsc::UnboundedSender<String>;
+            let cb_state_ptr = cb_state_addr as *mut CallbackState;
             let cprompt = unsafe { CStr::from_bytes_with_nul_unchecked(&prompt_bytes) };
             let ret = unsafe {
                 nezumi_llama_generate(
@@ -153,13 +232,13 @@ impl Engine for LlamaEngine {
                     max_tokens,
                     temperature,
                     token_cb,
-                    tx_ptr as *mut c_void,
+                    cb_state_ptr as *mut c_void,
                 )
             };
 
-            let tx = unsafe { Box::from_raw(tx_ptr) };
+            let cb_state = unsafe { Box::from_raw(cb_state_ptr) };
             if ret != 0 {
-                let _ = tx.send(format!("Error: llama error {}", ret));
+                let _ = cb_state.tx.send(format!("Error: llama error {}", ret));
             }
         });
 
