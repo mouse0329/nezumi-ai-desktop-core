@@ -242,6 +242,14 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
 }
 
 async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Error>> {
+    // Windows コンソールでの UTF-8 出力を改善するための設定
+    #[cfg(target_os = "windows")]
+    {
+        use std::io::Write;
+        // 標準出力をUTF-8モードに設定（Windows 10以降）
+        let _ = windows_console_utf8::enable();
+    }
+
     loop {
         print!("you> ");
         io::stdout().flush()?;
@@ -253,37 +261,71 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
         }
         print!("ai>  ");
         io::stdout().flush()?;
+        
         let mut stream = core.chat_and_save(input).await?;
-        let mut buffer = String::new();
+        let mut full_response = String::new();
+        let mut char_buffer = String::new();
+        
         'chat: while let Some(token) = stream.next().await {
-            buffer.push_str(&token);
+            full_response.push_str(&token);
+            
+            // トークンをそのまま出力するのではなく、一旦バッファに蓄積
+            char_buffer.push_str(&token);
+            
+            // バッファが一定サイズになったら、または改行が含まれていたら出力
+            if char_buffer.len() >= 3 || char_buffer.contains('\n') {
+                // 不完全なUTF-8シーケンスを避けるため、最後の文字をチェック
+                if let Some(last_char_boundary) = char_buffer.char_indices().last() {
+                    let (idx, _) = last_char_boundary;
+                    let complete_part = &char_buffer[..idx + 1];
+                    let incomplete_part = char_buffer[idx + 1..].to_string();
+                    
+                    if !complete_part.is_empty() {
+                        print!("{}", complete_part);
+                        io::stdout().flush()?;
+                    }
+                    char_buffer = incomplete_part;
+                } else {
+                    // 完全に不正なUTF-8の場合はクリア
+                    char_buffer.clear();
+                }
+            }
+            
+            // タグ処理のためのバッファチェック
             loop {
-                if let Some(idx) = buffer.find('<') {
+                if let Some(idx) = char_buffer.find('<') {
                     if idx > 0 {
-                        print!("{}", &buffer[..idx]);
-                        buffer.drain(..idx);
+                        print!("{}", &char_buffer[..idx]);
+                        char_buffer.drain(..idx);
+                        io::stdout().flush()?;
                         continue;
                     }
-                    if buffer.starts_with("<start_of_turn>") {
-                        if !consume_start_of_turn_tag(&mut buffer) {
+                    if char_buffer.starts_with("<start_of_turn>") {
+                        if !consume_start_of_turn_tag(&mut char_buffer) {
                             break;
                         }
                         continue;
                     }
-                    if buffer.starts_with("<end_of_turn>") {
+                    if char_buffer.starts_with("<end_of_turn>") {
                         break 'chat;
                     }
-                    if consume_unknown_tag(&mut buffer) {
+                    if consume_unknown_tag(&mut char_buffer) {
                         continue;
                     }
                     break;
                 }
-                if !buffer.is_empty() {
-                    print!("{}", buffer);
-                    buffer.clear();
+                if !char_buffer.is_empty() {
+                    // 残りを出力
+                    print!("{}", char_buffer);
+                    char_buffer.clear();
+                    io::stdout().flush()?;
                 }
                 break;
             }
+        }
+        // 最後のバッファを出力
+        if !char_buffer.is_empty() {
+            print!("{}", char_buffer);
             io::stdout().flush()?;
         }
         println!();

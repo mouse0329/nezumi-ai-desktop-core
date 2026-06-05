@@ -25,3 +25,6 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 ratatui   = "0.26"
 crossterm = "0.27"
+
+[target.'cfg(windows)'.dependencies]
+windows-console-utf8 = "0.1"
