@@ -217,23 +217,23 @@ extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt
             emitted_len = safe_len;
         }
 
-            llama_batch next = llama_batch_get_one(&token_id, 1);
-            if (llama_decode(state->ctx, next) != 0)
-                break;
-        }
-
-        if (!stopped && generated.size() > emitted_len)
-        {
-            size_t final_len = utf8_truncate_to_boundary(generated, generated.size());
-            if (final_len > emitted_len)
-            {
-                std::string out = generated.substr(emitted_len, final_len - emitted_len);
-                if (cb)
-                    cb(out.c_str(), user_data);
-            }
-        }
-        return 0;
+        llama_batch next = llama_batch_get_one(&token_id, 1);
+        if (llama_decode(state->ctx, next) != 0)
+            break;
     }
+
+    if (!stopped && generated.size() > emitted_len)
+    {
+        size_t final_len = utf8_truncate_to_boundary(generated, generated.size());
+        if (final_len > emitted_len)
+        {
+            std::string out = generated.substr(emitted_len, final_len - emitted_len);
+            if (cb)
+                cb(out.c_str(), user_data);
+        }
+    }
+    return 0;
+}
 
 extern "C" void nezumi_llama_free(NezumiLlamaState *state)
 {
