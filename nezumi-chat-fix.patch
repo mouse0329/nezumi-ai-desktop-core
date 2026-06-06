@@ -1,0 +1,83 @@
+--- /tmp/orig/cli/src/main.rs	2026-06-05 22:49:31.000000000 +0000
++++ /home/claude/cli/src/main.rs	2026-06-05 23:30:17.487317878 +0000
+@@ -277,29 +277,45 @@
+         io::stdout().flush()?;
+         let mut stream = core.chat_and_save(input, Some(max_tokens), Some(temperature)).await?;
+         let mut buffer = String::new();
+-        'chat: while let Some(token) = stream.next().await {
+-            buffer.push_str(&token);
++        let mut done = false;
++        while !done {
++            // 次のトークンを受け取る。ストリーム終了なら残バッファを吐いて終わり
++            match stream.next().await {
++                Some(token) => buffer.push_str(&token),
++                None => {
++                    done = true;
++                }
++            }
++            // バッファを処理できる限り処理する
+             loop {
+                 if let Some(idx) = buffer.find('<') {
++                    // '<' より前のテキストはそのまま出力
+                     if idx > 0 {
+                         print!("{}", &buffer[..idx]);
+                         buffer.drain(..idx);
+                         continue;
+                     }
++                    // <end_of_turn> が来たら、その前のテキストを出力して終了
++                    if buffer.starts_with("<end_of_turn>") {
++                        done = true;
++                        break;
++                    }
++                    // <start_of_turn>xxx\n を消費できれば続行
+                     if buffer.starts_with("<start_of_turn>") {
+-                        if !consume_start_of_turn_tag(&mut buffer) {
+-                            break;
++                        if consume_start_of_turn_tag(&mut buffer) {
++                            continue;
+                         }
+-                        continue;
+-                    }
+-                    if buffer.starts_with("<end_of_turn>") {
+-                        break 'chat;
++                        // タグが途中までしか届いていない → 次のトークン待ち
++                        break;
+                     }
++                    // その他の <tag> を消費できれば続行
+                     if consume_unknown_tag(&mut buffer) {
+                         continue;
+                     }
++                    // '<' で始まるがタグが完結していない → 次のトークン待ち
+                     break;
+                 }
++                // '<' がない → バッファ全部出力
+                 if !buffer.is_empty() {
+                     print!("{}", buffer);
+                     buffer.clear();
+@@ -308,6 +324,26 @@
+             }
+             io::stdout().flush()?;
+         }
++        // ストリーム終了後に残ったテキストを出力（<end_of_turn>より前など）
++        if !buffer.is_empty() {
++            // タグを除去して残テキストだけ出力
++            let clean: String = buffer
++                .split('<')
++                .enumerate()
++                .filter_map(|(i, part)| {
++                    if i == 0 {
++                        Some(part.to_string())
++                    } else if let Some(end) = part.find('>') {
++                        Some(part[end + 1..].to_string())
++                    } else {
++                        None
++                    }
++                })
++                .collect();
++            if !clean.is_empty() {
++                print!("{}", clean);
++            }
++        }
+         println!();
+     }
+ }

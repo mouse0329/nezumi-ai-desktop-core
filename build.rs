@@ -52,7 +52,8 @@ fn build_llama(target: &str) {
     if env::var("CARGO_FEATURE_CUDA").is_ok() {
         cfg.define("LLAMA_CUDA", "ON")
             .define("GGML_CUDA", "ON")
-            .define("CMAKE_CUDA_ARCHITECTURES", "89");
+            .define("CUDA_ARCHITECTURES", "80;86;89")
+            .define("CMAKE_CUDA_ARCHITECTURES", "80;86;89");
     }
     if env::var("CARGO_FEATURE_METAL").is_ok() && target.contains("apple") {
         cfg.define("LLAMA_METAL", "ON");

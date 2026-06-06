@@ -128,12 +128,19 @@ impl NezumiCore {
     pub async fn chat_and_save(
         &mut self,
         user_input: &str,
+        max_tokens: Option<usize>,
+        temperature: Option<f32>,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
         self.session.add("user", user_input).await?;
         let history = self.session.history().await?;
         let mut prompt = self.build_chat_prompt(&history, user_input, false);
         prompt.push_str("<start_of_turn>model\n");
-        let mut inner = self.engine.generate(GenerateRequest::new(prompt)).await?;
+        let req = GenerateRequest {
+            prompt,
+            max_tokens,
+            temperature,
+        };
+        let mut inner = self.engine.generate(req).await?;
         let session = Arc::clone(&self.session);
 
         Ok(Box::pin(async_stream::stream! {

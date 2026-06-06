@@ -7,6 +7,18 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::Path;
 
+#[cfg(target_os = "windows")]
+fn enable_windows_utf8() {
+    use windows_sys::Win32::System::Console::{SetConsoleOutputCP, SetConsoleCP};
+    unsafe {
+        let _ = SetConsoleOutputCP(65001);
+        let _ = SetConsoleCP(65001);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn enable_windows_utf8() {}
+
 fn parse_args(args: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut i = 0;
@@ -222,6 +234,16 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
         .and_then(|v| v.parse().ok())
         .or(entry.n_ctx)
         .unwrap_or(2048);
+    let max_tokens = opts
+        .get("max-tokens")
+        .and_then(|v| v.parse().ok())
+        .or(entry.max_tokens)
+        .unwrap_or(512);
+    let temperature = opts
+        .get("temp")
+        .and_then(|v| v.parse().ok())
+        .or(entry.temperature)
+        .unwrap_or(0.8f32);
     let system_prompt = opts
         .get("system")
         .cloned()
@@ -238,10 +260,10 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
     let mut core = NezumiCore::init(core_config).await?;
     core.load_model(&entry.path, load_config).await?;
     println!("Ready. Ctrl+C to quit.\n");
-    chat_loop(&mut core).await
+    chat_loop(&mut core, max_tokens, temperature).await
 }
 
-async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Error>> {
+async fn chat_loop(core: &mut NezumiCore, max_tokens: usize, temperature: f32) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         print!("you> ");
         io::stdout().flush()?;
@@ -253,40 +275,76 @@ async fn chat_loop(core: &mut NezumiCore) -> Result<(), Box<dyn std::error::Erro
         }
         print!("ai>  ");
         io::stdout().flush()?;
-        let mut stream = core.chat_and_save(input).await?;
-        let mut buffer = String::new();
-        'chat: while let Some(token) = stream.next().await {
-            buffer.push_str(&token);
-            loop {
-                if let Some(idx) = buffer.find('<') {
-                    if idx > 0 {
-                        print!("{}", &buffer[..idx]);
-                        buffer.drain(..idx);
-                        continue;
+        let mut stream = core.chat_and_save(input, Some(max_tokens), Some(temperature)).await?;
+            let mut buffer = String::new();
+            let mut done = false;
+            while !done {
+                // 次のトークンを受け取る。ストリーム終了なら残バッファを吐いて終わり
+                match stream.next().await {
+                    Some(token) => buffer.push_str(&token),
+                    None => {
+                        done = true;
                     }
-                    if buffer.starts_with("<start_of_turn>") {
-                        if !consume_start_of_turn_tag(&mut buffer) {
+                }
+                // バッファを処理できる限り処理する
+                loop {
+                    if let Some(idx) = buffer.find('<') {
+                        // '<' より前のテキストはそのまま出力
+                        if idx > 0 {
+                            print!("{}", &buffer[..idx]);
+                            buffer.drain(..idx);
+                            continue;
+                        }
+                        // <end_of_turn> が来たら、その前のテキストを出力して終了
+                        if buffer.starts_with("<end_of_turn>") {
+                            done = true;
                             break;
                         }
-                        continue;
+                        // <start_of_turn>xxx\n を消費できれば続行
+                        if buffer.starts_with("<start_of_turn>") {
+                            if consume_start_of_turn_tag(&mut buffer) {
+                                continue;
+                            }
+                            // タグが途中までしか届いていない → 次のトークン待ち
+                            break;
+                        }
+                        // その他の <tag> を消費できれば続行
+                        if consume_unknown_tag(&mut buffer) {
+                            continue;
+                        }
+                        // '<' で始まるがタグが完結していない → 次のトークン待ち
+                        break;
                     }
-                    if buffer.starts_with("<end_of_turn>") {
-                        break 'chat;
-                    }
-                    if consume_unknown_tag(&mut buffer) {
-                        continue;
+                    // '<' がない → バッファ全部出力
+                    if !buffer.is_empty() {
+                        print!("{}", buffer);
+                        buffer.clear();
                     }
                     break;
                 }
-                if !buffer.is_empty() {
-                    print!("{}", buffer);
-                    buffer.clear();
-                }
-                break;
+                io::stdout().flush()?;
             }
-            io::stdout().flush()?;
-        }
-        println!();
+            // ストリーム終了後に残ったテキストを出力（<end_of_turn>より前など）
+            if !buffer.is_empty() {
+                // タグを除去して残テキストだけ出力
+                let clean: String = buffer
+                    .split('<')
+                    .enumerate()
+                    .filter_map(|(i, part)| {
+                        if i == 0 {
+                            Some(part.to_string())
+                        } else if let Some(end) = part.find('>') {
+                            Some(part[end + 1..].to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !clean.is_empty() {
+                    print!("{}", clean);
+                }
+            }
+            println!();
     }
 }
 
@@ -322,6 +380,7 @@ fn consume_unknown_tag(buffer: &mut String) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    enable_windows_utf8();
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("import") => cmd_import(&args[2..])?,

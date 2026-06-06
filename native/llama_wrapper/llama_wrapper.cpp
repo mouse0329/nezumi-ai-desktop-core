@@ -11,8 +11,21 @@ struct NezumiLlamaState
     llama_sampler *sampler = nullptr;
     const llama_vocab *vocab = nullptr;
     int32_t n_ctx = 2048;
+    float temperature = 0.8f;
     std::string last_prompt;
 };
+
+static llama_sampler *create_sampler(float temperature)
+{
+    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
+    llama_sampler *sampler = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9f, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(-1, 1.18f, 0.2f, 0.3f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    return sampler;
+}
 
 // ���O�����S�ɖق点��
 void dummy_log_callback(ggml_log_level level, const char *text, void *user_data)
@@ -109,15 +122,7 @@ extern "C" NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n
         return nullptr;
     }
 
-    auto sparams = llama_sampler_chain_default_params();
-    llama_sampler *sampler = llama_sampler_chain_init(sparams);
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9f, 1));
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.8f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(-1, 1.18f, 0.2f, 0.3f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-
-    state->sampler = sampler;
+    state->sampler = create_sampler(state->temperature);
     return state;
 }
 
@@ -141,6 +146,14 @@ extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt
                 return -4;
         }
         input_to_decode = prompt_str;
+    }
+
+    if (state->temperature != temperature)
+    {
+        if (state->sampler)
+            llama_sampler_free(state->sampler);
+        state->sampler = create_sampler(temperature);
+        state->temperature = temperature;
     }
 
     llama_sampler_reset(state->sampler);
