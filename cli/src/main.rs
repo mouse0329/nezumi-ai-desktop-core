@@ -59,6 +59,7 @@ fn print_usage() {
     eprintln!("  --temp <float>            temperature (default: 0.8)");
     eprintln!("  --max-tokens <int>        max tokens (default: 512)");
     eprintln!("  --system <prompt>         system prompt");
+    eprintln!("  --think                   enable thinking mode (Qwen3.5 etc.)");
 }
 
 fn cmd_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -248,6 +249,7 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
         .get("system")
         .cloned()
         .or_else(|| entry.system_prompt.clone());
+    let thinking = opts.contains_key("think");
     println!("Loading: {} ({})", name, entry.path);
     let load_config = LoadConfig {
         n_gpu_layers: gpu_layers,
@@ -255,11 +257,12 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
     };
     let core_config = Config {
         system_prompt,
+        thinking,
         ..Default::default()
     };
     let mut core = NezumiCore::init(core_config).await?;
     core.load_model(&entry.path, load_config).await?;
-    println!("Ready. Ctrl+C to quit.\n");
+    println!("Ready. Type 'exit' to quit, Ctrl+C to interrupt generation.\n");
     chat_loop(&mut core, max_tokens, temperature).await
 }
 
@@ -268,59 +271,78 @@ async fn chat_loop(core: &mut NezumiCore, max_tokens: usize, temperature: f32) -
         print!("you> ");
         io::stdout().flush()?;
         let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                println!("\nExiting...");
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(e) => return Err(e.into()),
+        }
         let input = input.trim();
         if input.is_empty() {
             continue;
+        }
+        if input == "exit" || input == "quit" || input == ":q" {
+            println!("\nExiting...");
+            return Ok(());
         }
         print!("ai>  ");
         io::stdout().flush()?;
         let mut stream = core.chat_and_save(input, Some(max_tokens), Some(temperature)).await?;
             let mut buffer = String::new();
             let mut done = false;
+            let mut skip_until_double_newline = false;  // 思考セクションをスキップ中か
+            
             while !done {
                 // 次のトークンを受け取る。ストリーム終了なら残バッファを吐いて終わり
-                match stream.next().await {
-                    Some(token) => buffer.push_str(&token),
-                    None => {
+                tokio::select! {
+                    res = stream.next() => {
+                        match res {
+                            Some(token) => buffer.push_str(&token),
+                            None => {
+                                done = true;
+                            }
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        println!("\n[Interrupted by user]");
                         done = true;
                     }
                 }
-                // バッファを処理できる限り処理する
+                
+                // バッファ処理
                 loop {
-                    if let Some(idx) = buffer.find('<') {
-                        // '<' より前のテキストはそのまま出力
-                        if idx > 0 {
-                            print!("{}", &buffer[..idx]);
-                            buffer.drain(..idx);
+                    if skip_until_double_newline {
+                        // 思考セクション内 → 「\n\n」を探す
+                        if let Some(pos) = buffer.find("\n\n") {
+                            // 見つかった → スキップ終了
+                            skip_until_double_newline = false;
+                            buffer.drain(..pos + 2);  // 「\n\n」も含めて削除
                             continue;
-                        }
-                        // <end_of_turn> が来たら、その前のテキストを出力して終了
-                        if buffer.starts_with("<end_of_turn>") {
-                            done = true;
+                        } else {
+                            // 見つからない → バッファ全部スキップ待ち
+                            buffer.clear();
                             break;
                         }
-                        // <start_of_turn>xxx\n を消費できれば続行
-                        if buffer.starts_with("<start_of_turn>") {
-                            if consume_start_of_turn_tag(&mut buffer) {
-                                continue;
+                    } else {
+                        // 通常モード → 「Thinking Process:」を探す
+                        if let Some(pos) = buffer.find("Thinking Process:") {
+                            // 見つかった → その前のテキストを出力
+                            if pos > 0 {
+                                print!("{}", &buffer[..pos]);
                             }
-                            // タグが途中までしか届いていない → 次のトークン待ち
+                            // スキップモード開始
+                            skip_until_double_newline = true;
+                            buffer.drain(..pos);
+                            continue;
+                        } else {
+                            // 見つからない → バッファ全部出力
+                            print!("{}", buffer);
+                            buffer.clear();
                             break;
                         }
-                        // その他の <tag> を消費できれば続行
-                        if consume_unknown_tag(&mut buffer) {
-                            continue;
-                        }
-                        // '<' で始まるがタグが完結していない → 次のトークン待ち
-                        break;
                     }
-                    // '<' がない → バッファ全部出力
-                    if !buffer.is_empty() {
-                        print!("{}", buffer);
-                        buffer.clear();
-                    }
-                    break;
                 }
                 io::stdout().flush()?;
             }
@@ -369,6 +391,28 @@ fn consume_start_of_turn_tag(buffer: &mut String) -> bool {
     false
 }
 
+fn consume_think_tag(buffer: &mut String) -> bool {
+    if buffer.starts_with("<think>") {
+        // Check if we have the complete closing tag
+        if let Some(end) = buffer.find("</think>") {
+            // Extract the thinking content (between tags)
+            let think_content = &buffer["<think>".len()..end].trim();
+            
+            if !think_content.is_empty() {
+                // Print thinking content with faint/dimmed style
+                println!("\x1b[2m[思考] {}\x1b[0m", think_content);
+            }
+            
+            // Remove both opening and closing tags and everything between
+            buffer.drain(..end + "</think>".len());
+            return true;
+        }
+        // Tag is not yet complete, wait for more tokens
+        return false;
+    }
+    false
+}
+
 fn consume_unknown_tag(buffer: &mut String) -> bool {
     if let Some(end) = buffer.find('>') {
         buffer.drain(..=end);
@@ -381,6 +425,13 @@ fn consume_unknown_tag(buffer: &mut String) -> bool {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_windows_utf8();
+
+    // Ctrl+C でプロセスが終了しないようにハンドラを設定（何もしない）
+    // これにより tokio::signal::ctrl_c() で制御可能になる
+    let _ = ctrlc::set_handler(|| {
+        // ここでは何もしない。chat_loop 内の tokio::select! で処理する。
+    });
+
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("import") => cmd_import(&args[2..])?,

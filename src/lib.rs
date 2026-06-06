@@ -21,6 +21,7 @@ pub struct Config {
     pub db_path: Option<String>,
     pub preference: UserPreference,
     pub system_prompt: Option<String>,
+    pub thinking: bool,
 }
 
 impl Default for Config {
@@ -29,6 +30,7 @@ impl Default for Config {
             db_path: None,
             preference: UserPreference::Auto,
             system_prompt: None,
+            thinking: false,
         }
     }
 }
@@ -38,6 +40,8 @@ pub struct NezumiCore {
     pub session: Arc<dyn SessionStore>,
     preference: UserPreference,
     system_prompt: Option<String>,
+    thinking: bool,
+    model_path: Option<String>,
 }
 
 impl NezumiCore {
@@ -49,6 +53,8 @@ impl NezumiCore {
             session,
             preference: config.preference,
             system_prompt: config.system_prompt,
+            thinking: config.thinking,
+            model_path: None,
         })
     }
 
@@ -74,6 +80,7 @@ impl NezumiCore {
         }
         engine.load(path, config).await?;
         self.engine = engine;
+        self.model_path = Some(path.to_string());
         Ok(())
     }
 
@@ -91,14 +98,51 @@ impl NezumiCore {
         user_input: &str,
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::with_capacity(history.len() + 2);
+        let qwen_instant = self.should_use_qwen_instant_directive();
+
         if let Some(ref sys) = self.system_prompt {
-            messages.push(ChatMessage::new("system", sys));
+            let sys_content = if !self.thinking && !qwen_instant {
+                let mut sys_content = sys.clone();
+                if !sys_content.contains("NO_THINK") && !sys_content.contains("THINK") {
+                    if !sys_content.is_empty() {
+                        sys_content.push(' ');
+                    }
+                    sys_content.push_str("NO_THINK");
+                }
+                sys_content
+            } else {
+                sys.clone()
+            };
+            messages.push(ChatMessage::new("system", sys_content));
+        } else if !self.thinking && !qwen_instant {
+            // No explicit system prompt: use reasoning-mode token in a system message
+            messages.push(ChatMessage::new("system", "NO_THINK"));
+        } else if self.thinking {
+            // When thinking is enabled, provide explicit instruction to think through the problem
+            messages.push(ChatMessage::new("system", "You are a helpful assistant. Think through the problem step by step before answering. Use your reasoning abilities to analyze the question carefully."));
         }
+
         for msg in history {
             messages.push(ChatMessage::new(&msg.role, &msg.content));
         }
-        messages.push(ChatMessage::new("user", user_input));
+
+        let user_content = if qwen_instant {
+            format!("{}\n/no_think", user_input)
+        } else {
+            user_input.to_string()
+        };
+        messages.push(ChatMessage::new("user", &user_content));
         messages
+    }
+
+    fn should_use_qwen_instant_directive(&self) -> bool {
+        if self.thinking {
+            return false;
+        }
+        self.model_path
+            .as_deref()
+            .map(|path| path.to_lowercase().contains("qwen"))
+            .unwrap_or(false)
     }
 
     pub async fn chat(
@@ -121,7 +165,6 @@ impl NezumiCore {
         // → history に user が混入すると二重挿入になるため
         let history = self.session.history().await?;
         let messages = self.build_chat_messages(&history, user_input);
-
         self.session.add("user", user_input).await?;
 
         let mut inner = self.engine.chat(&messages, max_tokens, temperature).await?;
@@ -143,20 +186,33 @@ impl NezumiCore {
 }
 
 fn strip_template_tags(s: &str) -> String {
+    // 終端マーカーで切り捨て（Gemma / ChatML 両対応）
     let s = if let Some(idx) = s.find("<end_of_turn>") {
+        &s[..idx]
+    } else if let Some(idx) = s.find("<|im_end|>") {
         &s[..idx]
     } else {
         s
     };
+    // 開始タグ行を除去（<start_of_turn>xxx\n / <|im_start|>xxx\n）
     let mut result = String::new();
     let mut rest = s;
-    while let Some(idx) = rest.find("<start_of_turn>") {
-        result.push_str(&rest[..idx]);
-        if let Some(nl) = rest[idx..].find('\n') {
-            rest = &rest[idx + nl + 1..];
-        } else {
-            rest = "";
-            break;
+    loop {
+        let next = [rest.find("<start_of_turn>"), rest.find("<|im_start|>")]
+            .into_iter()
+            .flatten()
+            .min();
+        match next {
+            Some(idx) => {
+                result.push_str(&rest[..idx]);
+                if let Some(nl) = rest[idx..].find('\n') {
+                    rest = &rest[idx + nl + 1..];
+                } else {
+                    rest = "";
+                    break;
+                }
+            }
+            None => break,
         }
     }
     result.push_str(rest);
@@ -172,5 +228,22 @@ mod tests {
         let raw = "<start_of_turn>model\nHello<end_of_turn>\n<start_of_turn>user\nIgnored";
         let cleaned = strip_template_tags(raw);
         assert_eq!(cleaned, "Hello");
+    }
+
+    #[test]
+    fn qwen_model_appends_no_think_to_last_user_message() {
+        let core = NezumiCore {
+            engine: create_engine(EngineType::Llama),
+            session: Arc::new(InMemoryStore::new()),
+            preference: UserPreference::Auto,
+            system_prompt: None,
+            thinking: false,
+            model_path: Some("/models/Qwen3.5-4B-Q4_K_M.gguf".to_string()),
+        };
+
+        let messages = core.build_chat_messages(&[], "こんにちは");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "こんにちは\n/no_think");
     }
 }

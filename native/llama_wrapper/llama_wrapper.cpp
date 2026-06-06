@@ -18,6 +18,7 @@ struct NezumiLlamaState
     const llama_vocab *vocab = nullptr;
     int32_t n_ctx = 2048;
     float temperature = 0.8f;
+    // Text that has actually been decoded into ctx, including generated tokens.
     std::string last_prompt;
     std::string chat_template;
     std::vector<StoredChatMessage> chat_history;
@@ -50,7 +51,6 @@ static size_t find_stop_pos(const std::string &text, size_t start_pos)
         "<end_of_turn>",
         "<start_of_turn>",
         "<|im_end|>",
-        "<|im_start|>",
     };
 
     size_t best = std::string::npos;
@@ -104,7 +104,7 @@ static bool apply_chat_template(
         est += msg.role ? std::strlen(msg.role) : 0;
         est += msg.content ? std::strlen(msg.content) : 0;
     }
-    est *= 2;
+    est *= 4; // 日本語等マルチバイト文字（1文字最大4バイト）を考慮
 
     std::vector<char> buf(est);
     int32_t len = llama_chat_apply_template(
@@ -172,6 +172,7 @@ static bool reset_llama_context(NezumiLlamaState *state)
     cparams.n_batch = cparams.n_ctx;
 
     state->ctx = llama_init_from_model(state->model, cparams);
+    state->last_prompt.clear();
     return state->ctx != nullptr;
 }
 
@@ -231,6 +232,7 @@ static int generate_from_prompt(
         return -1;
     const llama_vocab *vocab = state->vocab;
     std::string input_to_decode;
+    bool add_bos = false;
     if (!state->last_prompt.empty() && prompt_str.rfind(state->last_prompt, 0) == 0)
     {
         input_to_decode = prompt_str.substr(state->last_prompt.size());
@@ -243,6 +245,7 @@ static int generate_from_prompt(
                 return -4;
         }
         input_to_decode = prompt_str;
+        add_bos = true;
     }
 
     if (state->temperature != temperature)
@@ -259,11 +262,11 @@ static int generate_from_prompt(
     {
         const int prompt_len = static_cast<int>(input_to_decode.size());
         std::vector<llama_token> tokens(prompt_len + 16);
-        int n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
+        int n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), add_bos, false);
         if (n_tokens < 0)
         {
             tokens.resize(static_cast<size_t>(-n_tokens));
-            n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), true, false);
+            n_tokens = llama_tokenize(vocab, input_to_decode.c_str(), prompt_len, tokens.data(), static_cast<int32_t>(tokens.size()), add_bos, false);
         }
         if (n_tokens < 0)
             return -2;
@@ -288,9 +291,10 @@ static int generate_from_prompt(
         llama_token token_id = llama_sampler_sample(state->sampler, state->ctx, -1);
         llama_sampler_accept(state->sampler, token_id);
 
-        // �I������
         if (llama_vocab_is_eog(vocab, token_id))
+        {
             break;
+        }
 
         int piece_len = llama_token_to_piece(vocab, token_id, piece_buf, static_cast<int32_t>(sizeof(piece_buf)) - 1, 0, false);
         if (piece_len < 0)
@@ -313,8 +317,9 @@ static int generate_from_prompt(
                         break;
                 }
             }
-            bool is_leading_stop = stop_pos == 0 && emitted_len == 0;
-            if (is_leading_stop)
+            bool is_leading_start_marker = stop_pos == 0 && emitted_len == 0 &&
+                                           (generated.rfind("<start_of_turn>", 0) == 0 || generated.rfind("<|im_start|>", 0) == 0);
+            if (is_leading_start_marker)
             {
                 // Allow a response to begin with a chat-start marker like
                 // <start_of_turn>model or <|im_start|>. The caller will strip
@@ -340,6 +345,7 @@ static int generate_from_prompt(
         llama_batch next = llama_batch_get_one(&token_id, 1);
         if (llama_decode(state->ctx, next) != 0)
             break;
+        state->last_prompt.append(piece_buf, static_cast<size_t>(piece_len));
     }
 
     if (!stopped && generated.size() > emitted_len)
@@ -382,8 +388,59 @@ extern "C" int nezumi_llama_chat(
 
     std::string prompt;
     if (!apply_chat_template(state, state->chat_messages, true, prompt))
+    {
+        // fprintf(stderr, "[nezumi_llama_chat] apply_chat_template failed (template=%s)\n",
+        //         state->chat_template.empty() ? "(empty/nullptr)" : state->chat_template.substr(0, 40).c_str());
         return -5;
+    }
 
+    // add_ass=trueでもQwen3.5等でassistantが付かない場合があるので強制補完
+    // "<|im_start|>\n" で終わっていたら "<|im_start|>assistant\n" に修正
+    {
+        const std::string tail_bare = "<|im_start|>\n";
+        const std::string tail_ass = "<|im_start|>assistant\n";
+        if (prompt.size() >= tail_bare.size() &&
+            prompt.compare(prompt.size() - tail_bare.size(), tail_bare.size(), tail_bare) == 0)
+        {
+            prompt.replace(prompt.size() - tail_bare.size(), tail_bare.size(), tail_ass);
+        }
+    }
+
+    // Qwen instant directive handling for thinking mode
+    // /no_think prevents thinking, so when absent, model can generate thinking
+    if (prompt.find("/no_think") == std::string::npos &&
+        prompt.find("</think>") == std::string::npos)
+    {
+        const std::string assistant_start = "<|im_start|>assistant\n";
+        const std::string think_begin = "<think>\n";
+        // Start the assistant response with thinking tag to encourage thinking mode
+        if (prompt.size() >= assistant_start.size() &&
+            prompt.compare(prompt.size() - assistant_start.size(), assistant_start.size(), assistant_start) == 0)
+        {
+            prompt += think_begin;
+        }
+    }
+
+    std::string escaped_prompt;
+    escaped_prompt.reserve(prompt.size() * 2);
+    for (char c : prompt)
+    {
+        switch (c)
+        {
+        case '\n':
+            escaped_prompt += "\\n";
+            break;
+        case '\r':
+            escaped_prompt += "\\r";
+            break;
+        case '\t':
+            escaped_prompt += "\\t";
+            break;
+        default:
+            escaped_prompt.push_back(c);
+            break;
+        }
+    }
     return generate_from_prompt(state, prompt, max_tokens, temperature, cb, user_data);
 }
 

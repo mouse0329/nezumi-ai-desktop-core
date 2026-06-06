@@ -1,6 +1,6 @@
 use crate::{
     engines::selector::ModelFormat,
-    engines::{Engine, GenerateRequest, LoadConfig, ModelMeta},
+    engines::{ChatMessage, Engine, GenerateRequest, LoadConfig, ModelMeta},
     error::NezumiError,
 };
 use async_trait::async_trait;
@@ -99,6 +99,44 @@ impl Engine for LiteRTEngine {
             .lock()
             .map_err(|e| NezumiError::ModelLoadFailed(e.to_string()))? = Some(path.to_string());
         Ok(())
+    }
+
+    async fn chat(
+        &self,
+        messages: &[ChatMessage],
+        max_tokens: Option<usize>,
+        temperature: Option<f32>,
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
+        let mut prompt = String::new();
+        for msg in messages {
+            if msg.role == "system" {
+                prompt.push_str(&msg.content);
+                prompt.push_str("\n\n");
+            }
+        }
+        for msg in messages {
+            match msg.role.as_str() {
+                "user" => {
+                    prompt.push_str("User: ");
+                    prompt.push_str(&msg.content);
+                    prompt.push('\n');
+                }
+                "assistant" | "model" => {
+                    prompt.push_str("Assistant: ");
+                    prompt.push_str(&msg.content);
+                    prompt.push('\n');
+                }
+                _ => {}
+            }
+        }
+        prompt.push_str("Assistant:");
+
+        let req = GenerateRequest {
+            prompt,
+            max_tokens,
+            temperature,
+        };
+        self.generate(req).await
     }
 
     async fn generate(
@@ -224,8 +262,12 @@ fn run_litert_subprocess(
             parse_buffer.push_str(&decoded);
 
             if !output_started {
-                if let Some(idx) = parse_buffer.find("<start_of_turn>model") {
-                    parse_buffer.drain(..idx + "<start_of_turn>model".len());
+                let marker_pos = parse_buffer
+                    .find("<start_of_turn>model")
+                    .map(|i| (i, "<start_of_turn>model".len()))
+                    .or_else(|| parse_buffer.rfind("\nAssistant:").map(|i| (i + 1, "Assistant:".len())));
+                if let Some((idx, marker_len)) = marker_pos {
+                    parse_buffer.drain(..idx + marker_len);
                     output_started = true;
                     parse_buffer = parse_buffer.trim_start_matches(|c: char| c == '\r' || c == '\n' || c.is_whitespace()).to_string();
                 } else {
@@ -238,6 +280,14 @@ fn run_litert_subprocess(
             }
 
             if output_started {
+                if let Some(pos) = parse_buffer.find("\nUser:") {
+                    let out = parse_buffer[..pos].trim().to_string();
+                    if !out.is_empty() {
+                        yield out;
+                    }
+                    parse_buffer.clear();
+                    break;
+                }
                 if let Some(pos) = parse_buffer.find("BenchmarkInfo").or_else(|| parse_buffer.find("benchmark_info")) {
                     let out = parse_buffer[..pos].trim().to_string();
                     if !out.is_empty() {

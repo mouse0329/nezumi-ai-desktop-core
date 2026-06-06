@@ -232,6 +232,7 @@ where
     unsafe extern "C" fn token_cb(token: *const c_char, user_data: *mut c_void) -> c_int {
         let state = &*(user_data as *mut TokenCallbackState);
         let s = CStr::from_ptr(token).to_string_lossy();
+        // Raw token debug output is intentionally suppressed.
         if state.tx.send(s.into_owned()).is_err() {
             return 1;
         }
