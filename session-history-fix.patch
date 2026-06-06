@@ -1,0 +1,59 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index abcb49b..e0be71b 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -131,10 +131,13 @@ impl NezumiCore {
+         max_tokens: Option<usize>,
+         temperature: Option<f32>,
+     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
+-        self.session.add("user", user_input).await?;
++        // プロンプト構築はsession.add("user")より先に行う
++        // → historyにuserが混入した状態でbuild_chat_promptを呼ぶと二重挿入になるため
+         let history = self.session.history().await?;
+-        let mut prompt = self.build_chat_prompt(&history, user_input, false);
+-        prompt.push_str("<start_of_turn>model\n");
++        let prompt = self.build_chat_prompt(&history, user_input, true);
++
++        self.session.add("user", user_input).await?;
++
+         let req = GenerateRequest {
+             prompt,
+             max_tokens,
+@@ -149,7 +152,36 @@ impl NezumiCore {
+                 assistant_output.push_str(&token);
+                 yield token;
+             }
+-            let _ = session.add("model", &assistant_output).await;
++            // テンプレートタグを除去してからセッションに保存する
++            // 生トークンのまま保存すると次ターンのプロンプトにタグが二重に入る
++            let clean = strip_template_tags(&assistant_output);
++            let _ = session.add("model", &clean).await;
+         }))
+     }
+ }
++
++/// モデル出力からGemmaテンプレートタグを除去する
++/// セッション保存前に呼ぶことで、次ターンのプロンプトへのタグ混入を防ぐ
++fn strip_template_tags(s: &str) -> String {
++    // <end_of_turn>以降は不要なので切り捨て
++    let s = if let Some(idx) = s.find("<end_of_turn>") {
++        &s[..idx]
++    } else {
++        s
++    };
++    // <start_of_turn>xxx
++ も除去
++    let mut result = String::new();
++    let mut rest = s;
++    while let Some(idx) = rest.find("<start_of_turn>") {
++        result.push_str(&rest[..idx]);
++        if let Some(nl) = rest[idx..].find(n) {
++            rest = &rest[idx + nl + 1..];
++        } else {
++            rest = "";
++            break;
++        }
++    }
++    result.push_str(rest);
++    result.trim().to_string()
++}

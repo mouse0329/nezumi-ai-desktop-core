@@ -4,6 +4,12 @@
 #include <string>
 #include <vector>
 
+struct StoredChatMessage
+{
+    std::string role;
+    std::string content;
+};
+
 struct NezumiLlamaState
 {
     llama_model *model = nullptr;
@@ -13,6 +19,9 @@ struct NezumiLlamaState
     int32_t n_ctx = 2048;
     float temperature = 0.8f;
     std::string last_prompt;
+    std::string chat_template;
+    std::vector<StoredChatMessage> chat_history;
+    std::vector<llama_chat_message> chat_messages;
 };
 
 static llama_sampler *create_sampler(float temperature)
@@ -72,6 +81,84 @@ static size_t utf8_truncate_to_boundary(const std::string &text, size_t max_len)
     return max_len;
 }
 
+static const char *normalize_chat_role(const char *role)
+{
+    if (role && std::strcmp(role, "model") == 0)
+    {
+        return "assistant";
+    }
+    return role ? role : "";
+}
+
+static bool apply_chat_template(
+    const NezumiLlamaState *state,
+    const std::vector<llama_chat_message> &chat,
+    bool add_ass,
+    std::string &out)
+{
+    const char *tmpl = state->chat_template.empty() ? nullptr : state->chat_template.c_str();
+
+    size_t est = 256;
+    for (const auto &msg : chat)
+    {
+        est += msg.role ? std::strlen(msg.role) : 0;
+        est += msg.content ? std::strlen(msg.content) : 0;
+    }
+    est *= 2;
+
+    std::vector<char> buf(est);
+    int32_t len = llama_chat_apply_template(
+        tmpl,
+        chat.data(),
+        chat.size(),
+        add_ass,
+        buf.data(),
+        static_cast<int32_t>(buf.size()));
+    if (len < 0)
+    {
+        return false;
+    }
+    if (len > static_cast<int32_t>(buf.size()))
+    {
+        buf.resize(static_cast<size_t>(len));
+        len = llama_chat_apply_template(
+            tmpl,
+            chat.data(),
+            chat.size(),
+            add_ass,
+            buf.data(),
+            len);
+        if (len < 0)
+        {
+            return false;
+        }
+    }
+
+    out.assign(buf.data(), static_cast<size_t>(len));
+    return true;
+}
+
+static void update_chat_history(NezumiLlamaState *state, const NezumiChatMessage *messages, size_t n_messages)
+{
+    state->chat_history.clear();
+    state->chat_messages.clear();
+    state->chat_history.reserve(n_messages);
+    state->chat_messages.reserve(n_messages);
+
+    for (size_t i = 0; i < n_messages; ++i)
+    {
+        state->chat_history.push_back({
+            messages[i].role ? messages[i].role : "",
+            messages[i].content ? messages[i].content : "",
+        });
+        const auto &stored = state->chat_history.back();
+        state->chat_messages.push_back({
+            normalize_chat_role(stored.role.c_str()),
+            stored.content.c_str(),
+        });
+    }
+}
+
 static bool reset_llama_context(NezumiLlamaState *state)
 {
     if (state->ctx)
@@ -82,7 +169,7 @@ static bool reset_llama_context(NezumiLlamaState *state)
 
     auto cparams = llama_context_default_params();
     cparams.n_ctx = static_cast<uint32_t>(state->n_ctx > 0 ? state->n_ctx : 2048);
-    cparams.n_batch = 512;
+    cparams.n_batch = cparams.n_ctx;
 
     state->ctx = llama_init_from_model(state->model, cparams);
     return state->ctx != nullptr;
@@ -122,17 +209,27 @@ extern "C" NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n
         return nullptr;
     }
 
+    const char *tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl)
+    {
+        state->chat_template = tmpl;
+    }
+
     state->sampler = create_sampler(state->temperature);
     return state;
 }
 
-extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t max_tokens, float temperature, NezumiTokenCallback cb, void *user_data)
+static int generate_from_prompt(
+    NezumiLlamaState *state,
+    const std::string &prompt_str,
+    int32_t max_tokens,
+    float temperature,
+    NezumiTokenCallback cb,
+    void *user_data)
 {
     if (!state)
         return -1;
     const llama_vocab *vocab = state->vocab;
-
-    std::string prompt_str(prompt ? prompt : "");
     std::string input_to_decode;
     if (!state->last_prompt.empty() && prompt_str.rfind(state->last_prompt, 0) == 0)
     {
@@ -177,7 +274,7 @@ extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt
             return -3;
     }
 
-    state->last_prompt = std::move(prompt_str);
+    state->last_prompt = prompt_str;
 
     const int32_t limit = max_tokens > 0 ? max_tokens : 512;
     char piece_buf[256];
@@ -216,8 +313,18 @@ extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt
                         break;
                 }
             }
-            stopped = true;
-            break;
+            bool is_leading_stop = stop_pos == 0 && emitted_len == 0;
+            if (is_leading_stop)
+            {
+                // Allow a response to begin with a chat-start marker like
+                // <start_of_turn>model or <|im_start|>. The caller will strip
+                // these markers when rendering the response.
+            }
+            else
+            {
+                stopped = true;
+                break;
+            }
         }
 
         size_t safe_len = generated.size() > STOP_LOOKBEHIND ? generated.size() - STOP_LOOKBEHIND : 0;
@@ -246,6 +353,38 @@ extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt
         }
     }
     return 0;
+}
+
+extern "C" int nezumi_llama_generate(NezumiLlamaState *state, const char *prompt, int32_t max_tokens, float temperature, NezumiTokenCallback cb, void *user_data)
+{
+    if (!state)
+        return -1;
+
+    std::string prompt_str(prompt ? prompt : "");
+    return generate_from_prompt(state, prompt_str, max_tokens, temperature, cb, user_data);
+}
+
+extern "C" int nezumi_llama_chat(
+    NezumiLlamaState *state,
+    const NezumiChatMessage *messages,
+    size_t n_messages,
+    int32_t max_tokens,
+    float temperature,
+    NezumiTokenCallback cb,
+    void *user_data)
+{
+    if (!state)
+        return -1;
+    if (!messages && n_messages > 0)
+        return -5;
+
+    update_chat_history(state, messages, n_messages);
+
+    std::string prompt;
+    if (!apply_chat_template(state, state->chat_messages, true, prompt))
+        return -5;
+
+    return generate_from_prompt(state, prompt, max_tokens, temperature, cb, user_data);
 }
 
 extern "C" void nezumi_llama_free(NezumiLlamaState *state)

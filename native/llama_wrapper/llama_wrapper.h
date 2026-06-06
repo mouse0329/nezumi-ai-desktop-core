@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -6,6 +7,11 @@ extern "C" {
 
 typedef void (*NezumiProgressCallback)(float progress, void *user_data);
 typedef int (*NezumiTokenCallback)(const char *token, void *user_data);
+
+typedef struct NezumiChatMessage {
+    const char *role;
+    const char *content;
+} NezumiChatMessage;
 
 struct NezumiLlamaState;
 
@@ -20,6 +26,16 @@ NezumiLlamaState *nezumi_llama_load(
 int nezumi_llama_generate(
     NezumiLlamaState *state,
     const char *prompt,
+    int32_t max_tokens,
+    float temperature,
+    NezumiTokenCallback cb,
+    void *user_data
+);
+
+int nezumi_llama_chat(
+    NezumiLlamaState *state,
+    const NezumiChatMessage *messages,
+    size_t n_messages,
     int32_t max_tokens,
     float temperature,
     NezumiTokenCallback cb,

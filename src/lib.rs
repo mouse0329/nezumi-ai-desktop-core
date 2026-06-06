@@ -4,8 +4,8 @@ pub mod ffi;
 pub mod session;
 
 use engines::{
-    create_engine, Engine, EngineSelector, EngineType, GenerateRequest, HardwareProfile, ModelMeta,
-    UserPreference,
+    create_engine, ChatMessage, Engine, EngineSelector, EngineType, GenerateRequest, HardwareProfile,
+    ModelMeta, UserPreference,
 };
 use error::NezumiError;
 use futures::{Stream, StreamExt};
@@ -85,34 +85,20 @@ impl NezumiCore {
         self.engine.generate(GenerateRequest::new(prompt)).await
     }
 
-    /// チャット形式で生成（履歴+Gemma3テンプレート）
-    fn build_chat_prompt(
+    fn build_chat_messages(
         &self,
         history: &[crate::session::Message],
         user_input: &str,
-        include_current_input: bool,
-    ) -> String {
-        let mut prompt = String::new();
-
+    ) -> Vec<ChatMessage> {
+        let mut messages = Vec::with_capacity(history.len() + 2);
         if let Some(ref sys) = self.system_prompt {
-            prompt.push_str(&format!("<start_of_turn>system\n{}<end_of_turn>\n", sys));
+            messages.push(ChatMessage::new("system", sys));
         }
-
         for msg in history {
-            prompt.push_str(&format!(
-                "<start_of_turn>{}\n{}<end_of_turn>\n",
-                msg.role, msg.content
-            ));
+            messages.push(ChatMessage::new(&msg.role, &msg.content));
         }
-
-        if include_current_input {
-            prompt.push_str(&format!(
-                "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
-                user_input
-            ));
-        }
-
-        prompt
+        messages.push(ChatMessage::new("user", user_input));
+        messages
     }
 
     pub async fn chat(
@@ -120,8 +106,8 @@ impl NezumiCore {
         user_input: &str,
     ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
         let history = self.session.history().await?;
-        let prompt = self.build_chat_prompt(&history, user_input, true);
-        self.engine.generate(GenerateRequest::new(prompt)).await
+        let messages = self.build_chat_messages(&history, user_input);
+        self.engine.chat(&messages, None, None).await
     }
 
     /// チャット生成+履歴保存
@@ -131,16 +117,14 @@ impl NezumiCore {
         max_tokens: Option<usize>,
         temperature: Option<f32>,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
-        self.session.add("user", user_input).await?;
+        // メッセージ構築は session.add("user") より先に行う
+        // → history に user が混入すると二重挿入になるため
         let history = self.session.history().await?;
-        let mut prompt = self.build_chat_prompt(&history, user_input, false);
-        prompt.push_str("<start_of_turn>model\n");
-        let req = GenerateRequest {
-            prompt,
-            max_tokens,
-            temperature,
-        };
-        let mut inner = self.engine.generate(req).await?;
+        let messages = self.build_chat_messages(&history, user_input);
+
+        self.session.add("user", user_input).await?;
+
+        let mut inner = self.engine.chat(&messages, max_tokens, temperature).await?;
         let session = Arc::clone(&self.session);
 
         Ok(Box::pin(async_stream::stream! {
@@ -149,7 +133,44 @@ impl NezumiCore {
                 assistant_output.push_str(&token);
                 yield token;
             }
-            let _ = session.add("model", &assistant_output).await;
+            let clean_output = strip_template_tags(&assistant_output);
+            let clean_output = clean_output.trim();
+            if !clean_output.is_empty() {
+                let _ = session.add("model", clean_output).await;
+            }
         }))
+    }
+}
+
+fn strip_template_tags(s: &str) -> String {
+    let s = if let Some(idx) = s.find("<end_of_turn>") {
+        &s[..idx]
+    } else {
+        s
+    };
+    let mut result = String::new();
+    let mut rest = s;
+    while let Some(idx) = rest.find("<start_of_turn>") {
+        result.push_str(&rest[..idx]);
+        if let Some(nl) = rest[idx..].find('\n') {
+            rest = &rest[idx + nl + 1..];
+        } else {
+            rest = "";
+            break;
+        }
+    }
+    result.push_str(rest);
+    result.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_template_tags_removes_tags_and_end_marker() {
+        let raw = "<start_of_turn>model\nHello<end_of_turn>\n<start_of_turn>user\nIgnored";
+        let cleaned = strip_template_tags(raw);
+        assert_eq!(cleaned, "Hello");
     }
 }

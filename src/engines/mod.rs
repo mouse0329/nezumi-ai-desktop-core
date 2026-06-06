@@ -46,6 +46,21 @@ impl LoadConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+impl ChatMessage {
+    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: content.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct GenerateRequest {
     pub prompt: String,
     pub max_tokens: Option<usize>,
@@ -69,6 +84,17 @@ pub trait Engine: Send + Sync {
         &self,
         req: GenerateRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError>;
+    async fn chat(
+        &self,
+        messages: &[ChatMessage],
+        max_tokens: Option<usize>,
+        temperature: Option<f32>,
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
+        let _ = (messages, max_tokens, temperature);
+        Err(NezumiError::InferenceError(
+            "chat not supported on this engine".into(),
+        ))
+    }
     fn supports(&self, meta: &ModelMeta) -> bool;
 }
 
