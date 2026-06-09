@@ -3,7 +3,10 @@
 /// Build:  cargo build --bin nezumiai-tui
 /// Run:    ./target/debug/nezumiai-tui
 mod db;
-use db::{key_from_name, load_db, save_db, ModelEntry};
+use db::{copy_model_into_store, key_from_name, load_db, save_db, ModelEntry};
+
+use futures::StreamExt;
+use nezumi_ai_core::{clean_assistant_output, Config, Error as CoreError, LoadConfig, NezumiCore};
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
@@ -157,6 +160,8 @@ enum ConfirmAction {
 }
 
 struct App {
+    runtime: tokio::runtime::Runtime,
+    core: Option<NezumiCore>,
     // DB
     db: db::ModelsDb,
     model_names: Vec<String>,
@@ -178,6 +183,7 @@ struct App {
 
 impl App {
     fn new() -> Self {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let db = load_db();
         let mut names: Vec<String> = db.models.values().map(|e| e.name.clone()).collect();
         names.sort();
@@ -186,6 +192,8 @@ impl App {
             list_state.select(Some(0));
         }
         Self {
+            runtime,
+            core: None,
             db,
             model_names: names,
             list_state,
@@ -253,41 +261,88 @@ impl App {
         }
     }
 
-    // Load selected model into chat screen (simulated — real integration
-    // requires async engine wiring outside the TUI event loop).
     fn load_selected(&mut self) {
-        if let Some(entry) = self.selected_entry() {
-            let name = entry.name.clone();
-            self.loaded_model = Some(name.clone());
-            self.chat_history.clear();
-            self.chat_scroll = 0;
-            self.chat_input.clear();
-            self.chat_history.push(ChatMessage {
-                role: "ai",
-                content: format!("Model '{}' loaded. How can I help?", name),
-            });
-            self.screen = Screen::Chat;
+        let Some(entry) = self.selected_entry().cloned() else {
+            return;
+        };
+        let name = entry.name.clone();
+        let path = entry.path.clone();
+        let load_config = LoadConfig {
+            n_gpu_layers: entry.gpu_layers.unwrap_or(999),
+            n_ctx: entry.n_ctx.unwrap_or(2048),
+        };
+        let core_config = Config {
+            system_prompt: entry.system_prompt.clone(),
+            thinking: false,
+            ..Default::default()
+        };
+
+        match self.runtime.block_on(async move {
+            let mut core = NezumiCore::init(core_config).await?;
+            core.load_model(&path, load_config).await?;
+            Ok::<NezumiCore, CoreError>(core)
+        }) {
+            Ok(core) => {
+                self.core = Some(core);
+                self.loaded_model = Some(name.clone());
+                self.chat_history.clear();
+                self.chat_scroll = 0;
+                self.chat_input.clear();
+                self.chat_history.push(ChatMessage {
+                    role: "ai",
+                    content: format!("Model '{name}' loaded. How can I help?"),
+                });
+                self.screen = Screen::Chat;
+                self.push_log(format!("✓ Loaded '{name}'"), C_GREEN);
+            }
+            Err(e) => self.push_log(format!("✗ Load failed: {e}"), C_RED),
         }
     }
 
-    // Commit typed chat message — wires into NezumiCore in real use.
-    // Here we echo back a placeholder so the UI is fully exercisable.
     fn send_chat(&mut self) {
         let input = self.chat_input.trim().to_string();
         if input.is_empty() {
             return;
         }
+        let Some(core) = self.core.as_mut() else {
+            self.push_log("✗ No model loaded", C_RED);
+            return;
+        };
+
+        let entry = self
+            .loaded_model
+            .as_ref()
+            .and_then(|n| self.db.models.get(&key_from_name(n)).cloned());
+        let max_tokens = entry.as_ref().and_then(|e| e.max_tokens).or(Some(512));
+        let temperature = entry.as_ref().and_then(|e| e.temperature).or(Some(0.8));
+
         self.chat_history.push(ChatMessage {
             role: "you",
             content: input.clone(),
         });
-        // Placeholder response — replace with actual engine call when integrating.
+        self.chat_input.clear();
+        self.chat_scroll = 0;
+
+        let response = self.runtime.block_on(async {
+            let mut stream = core
+                .chat_and_save(&input, max_tokens, temperature)
+                .await?;
+            let mut raw = String::new();
+            while let Some(token) = stream.next().await {
+                raw.push_str(&token);
+            }
+            Ok::<String, CoreError>(clean_assistant_output(&raw))
+        });
+
+        let ai_text = match response {
+            Ok(text) if !text.is_empty() => text,
+            Ok(_) => "(no response)".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
         self.chat_history.push(ChatMessage {
             role: "ai",
-            content: format!("[model response to: {}]", input),
+            content: ai_text,
         });
-        self.chat_input.clear();
-        self.chat_scroll = 0; // jump to bottom on new message
     }
 
     fn commit_edit(&mut self) {
@@ -898,25 +953,31 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) -> bool {
             }
             Enter if !app.edit_buf.is_empty() => {
                 let name = app.edit_buf.clone();
-                let path = app.import_path.clone();
-                app.db.models.insert(
-                    key_from_name(&name),
-                    ModelEntry {
-                        name: name.clone(),
-                        path,
-                        gpu_layers: None,
-                        n_ctx: None,
-                        system_prompt: None,
-                        temperature: None,
-                        max_tokens: None,
-                    },
-                );
-                app.refresh_names();
-                if let Some(idx) = app.model_names.iter().position(|n| *n == name) {
-                    app.list_state.select(Some(idx));
+                let src = std::path::Path::new(&app.import_path);
+                match copy_model_into_store(src) {
+                    Ok(dst_path) => {
+                        let model_path = dst_path.to_string_lossy().to_string();
+                        app.db.models.insert(
+                            key_from_name(&name),
+                            ModelEntry {
+                                name: name.clone(),
+                                path: model_path,
+                                gpu_layers: None,
+                                n_ctx: None,
+                                system_prompt: None,
+                                temperature: None,
+                                max_tokens: None,
+                            },
+                        );
+                        app.refresh_names();
+                        if let Some(idx) = app.model_names.iter().position(|n| *n == name) {
+                            app.list_state.select(Some(idx));
+                        }
+                        app.save();
+                        app.push_log(format!("✓ Imported '{name}'"), C_GREEN);
+                    }
+                    Err(e) => app.push_log(format!("✗ Import failed: {e}"), C_RED),
                 }
-                app.save();
-                app.push_log(format!("✓ Imported '{name}'"), C_GREEN);
                 app.mode = Mode::Normal;
                 app.edit_buf.clear();
                 app.import_path.clear();

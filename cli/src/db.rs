@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -40,7 +42,49 @@ pub fn load_db() -> ModelsDb {
         return ModelsDb::default();
     }
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    toml::from_str(&content).unwrap_or_default()
+    match toml::from_str(&content) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!(
+                "Warning: failed to parse {}: {e}. Using empty model list.",
+                path.display()
+            );
+            ModelsDb::default()
+        }
+    }
+}
+
+pub fn copy_model_into_store(src: &std::path::Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let file_name = src
+        .file_name()
+        .ok_or("invalid source path")?
+        .to_owned();
+    let model_dir = models_dir();
+    std::fs::create_dir_all(&model_dir)?;
+
+    let mut dst_path = model_dir.join(&file_name);
+    if dst_path.exists() {
+        let stem = src
+            .file_stem()
+            .unwrap_or_else(|| std::ffi::OsStr::new("model"));
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mut index = 1;
+        loop {
+            let candidate = if ext.is_empty() {
+                model_dir.join(format!("{}-{}", stem.to_string_lossy(), index))
+            } else {
+                model_dir.join(format!("{}-{}.{}", stem.to_string_lossy(), index, ext))
+            };
+            if !candidate.exists() {
+                dst_path = candidate;
+                break;
+            }
+            index += 1;
+        }
+    }
+
+    std::fs::copy(src, &dst_path)?;
+    Ok(dst_path)
 }
 
 pub fn save_db(db: &ModelsDb) -> Result<(), Box<dyn std::error::Error>> {
@@ -51,5 +95,18 @@ pub fn save_db(db: &ModelsDb) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn key_from_name(name: &str) -> String {
-    name.replace([':', '/', ' '], "_")
+    let normalized: String = name
+        .chars()
+        .map(|c| match c {
+            ' ' => "__sp__".to_string(),
+            ':' => "__co__".to_string(),
+            '/' => "__sl__".to_string(),
+            '\\' => "__bs__".to_string(),
+            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => c.to_string(),
+            _ => "__".to_string(),
+        })
+        .collect();
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    format!("{normalized}_{:016x}", hasher.finish())
 }

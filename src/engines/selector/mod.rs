@@ -46,13 +46,25 @@ impl ModelMeta {
             Quantization::Unknown
         };
 
+        let context_len = parse_context_len_hint(&lower);
+
         Self {
             path: path.to_string(),
             format,
-            context_len: None,
+            context_len,
             quantization,
         }
     }
+}
+
+fn parse_context_len_hint(lower_path: &str) -> Option<usize> {
+    for token in ["128k", "64k", "32k", "16k", "8k"] {
+        if lower_path.contains(token) {
+            let num: usize = token[..token.len() - 1].parse().ok()?;
+            return Some(num * 1024);
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -65,9 +77,9 @@ pub struct HardwareProfile {
 impl HardwareProfile {
     pub fn detect() -> Self {
         Self {
-            has_cuda: cfg!(feature = "cuda"),
-            has_metal: cfg!(feature = "metal"),
-            has_vulkan: cfg!(feature = "vulkan"),
+            has_cuda: cfg!(feature = "cuda") || std::env::var("NEZUMI_CUDA").is_ok(),
+            has_metal: cfg!(feature = "metal") || std::env::var("NEZUMI_METAL").is_ok(),
+            has_vulkan: cfg!(feature = "vulkan") || std::env::var("NEZUMI_VULKAN").is_ok(),
         }
     }
 
@@ -88,37 +100,11 @@ pub struct EngineSelector;
 
 impl EngineSelector {
     /// モデルメタ・ハードウェア・ユーザ設定から最適エンジンを選択
-    ///
-    /// 判定優先順位:
-    ///   1. フォーマット（TFLite → 常にLiteRT）
-    ///   2. ユーザ設定 QualityFirst → 常にLlama
-    ///   3. GPU有無 + 量子化レベル + context_len でフォールバック判定
-    pub fn select(meta: &ModelMeta, hw: &HardwareProfile, pref: &UserPreference) -> EngineType {
+    pub fn select(meta: &ModelMeta, _hw: &HardwareProfile, _pref: &UserPreference) -> EngineType {
         match meta.format {
-            ModelFormat::TfLite => return EngineType::LiteRT,
-            ModelFormat::Unknown => return EngineType::Llama,
-            ModelFormat::Gguf => {}
+            ModelFormat::TfLite => EngineType::LiteRT,
+            ModelFormat::Gguf | ModelFormat::Unknown => EngineType::Llama,
         }
-
-        // QualityFirst は常にllama.cpp
-        if matches!(pref, UserPreference::QualityFirst) {
-            return EngineType::Llama;
-        }
-
-        // GPU無し の場合、TFLite 以外は llama.cpp を使う
-        if !hw.has_gpu() {
-            let is_heavy_context = meta.context_len.map_or(false, |c| c > 8192);
-            let is_high_quant = matches!(meta.quantization, Quantization::High);
-            let speed_first = matches!(pref, UserPreference::SpeedFirst);
-
-            if matches!(meta.format, ModelFormat::TfLite)
-                && (speed_first || (!is_heavy_context && !is_high_quant))
-            {
-                return EngineType::LiteRT;
-            }
-        }
-
-        EngineType::Llama
     }
 }
 
@@ -137,5 +123,11 @@ mod tests {
         let pref = UserPreference::Auto;
 
         assert_eq!(EngineSelector::select(&meta, &hw, &pref), EngineType::Llama);
+    }
+
+    #[test]
+    fn parses_context_len_from_filename() {
+        let meta = ModelMeta::from_path("model-32k-q4.gguf");
+        assert_eq!(meta.context_len, Some(32 * 1024));
     }
 }

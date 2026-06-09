@@ -115,19 +115,20 @@ impl NezumiCore {
             };
             messages.push(ChatMessage::new("system", sys_content));
         } else if !self.thinking && !qwen_instant {
-            // No explicit system prompt: use reasoning-mode token in a system message
             messages.push(ChatMessage::new("system", "NO_THINK"));
         } else if self.thinking {
-            // When thinking is enabled, provide explicit instruction to think through the problem
-            messages.push(ChatMessage::new("system", "You are a helpful assistant. Think through the problem step by step before answering. Use your reasoning abilities to analyze the question carefully."));
+            messages.push(ChatMessage::new(
+                "system",
+                "You are a helpful assistant. Think through the problem step by step before answering. Use your reasoning abilities to analyze the question carefully.",
+            ));
         }
 
         for msg in history {
             messages.push(ChatMessage::new(&msg.role, &msg.content));
         }
 
-        let user_content = if qwen_instant {
-            format!("{}\n/no_think", user_input)
+        let user_content = if qwen_instant && !self.thinking {
+            format!("{user_input}\n/no_think")
         } else {
             user_input.to_string()
         };
@@ -145,30 +146,48 @@ impl NezumiCore {
             .unwrap_or(false)
     }
 
+    pub fn thinking_enabled(&self) -> bool {
+        self.thinking
+    }
+
     pub async fn chat(
         &self,
         user_input: &str,
+        max_tokens: Option<usize>,
+        temperature: Option<f32>,
     ) -> Result<impl futures::Stream<Item = String>, NezumiError> {
         let history = self.session.history().await?;
         let messages = self.build_chat_messages(&history, user_input);
-        self.engine.chat(&messages, None, None).await
+        self.engine.chat(&messages, max_tokens, temperature).await
     }
 
-    /// チャット生成+履歴保存
+    /// 成功した会話ターンを履歴に保存する（user + assistant をセットで保存）
+    pub async fn commit_chat_turn(
+        &self,
+        user_input: &str,
+        assistant_output: &str,
+    ) -> Result<(), NezumiError> {
+        let clean = clean_assistant_output(assistant_output);
+        if clean.is_empty() {
+            return Ok(());
+        }
+        self.session.add("user", user_input).await?;
+        self.session.add("model", &clean).await?;
+        Ok(())
+    }
+
+    /// チャット生成。履歴保存は推論成功後に行う。
     pub async fn chat_and_save(
         &mut self,
         user_input: &str,
         max_tokens: Option<usize>,
         temperature: Option<f32>,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
-        // メッセージ構築は session.add("user") より先に行う
-        // → history に user が混入すると二重挿入になるため
         let history = self.session.history().await?;
         let messages = self.build_chat_messages(&history, user_input);
-        self.session.add("user", user_input).await?;
-
         let mut inner = self.engine.chat(&messages, max_tokens, temperature).await?;
         let session = Arc::clone(&self.session);
+        let user_input = user_input.to_string();
 
         Ok(Box::pin(async_stream::stream! {
             let mut assistant_output = String::new();
@@ -176,17 +195,42 @@ impl NezumiCore {
                 assistant_output.push_str(&token);
                 yield token;
             }
-            let clean_output = strip_template_tags(&assistant_output);
-            let clean_output = clean_output.trim();
-            if !clean_output.is_empty() {
-                let _ = session.add("model", clean_output).await;
+            let clean = clean_assistant_output(&assistant_output);
+            if !clean.is_empty() {
+                if let Err(e) = session.add("user", &user_input).await {
+                    yield format!("[Session error: {e}]");
+                } else if let Err(e) = session.add("model", &clean).await {
+                    yield format!("[Session error: {e}]");
+                }
             }
         }))
     }
 }
 
+pub fn clean_assistant_output(s: &str) -> String {
+    strip_thinking_tags(&strip_template_tags(s))
+        .trim()
+        .to_string()
+}
+
+fn strip_thinking_tags(s: &str) -> String {
+    let mut result = s.to_string();
+    loop {
+        let Some(start) = result.find("<think>") else {
+            break;
+        };
+        if let Some(end) = result[start..].find("</think>") {
+            let remove_end = start + end + "</think>".len();
+            result.replace_range(start..remove_end, "");
+        } else {
+            result.truncate(start);
+            break;
+        }
+    }
+    result
+}
+
 fn strip_template_tags(s: &str) -> String {
-    // 終端マーカーで切り捨て（Gemma / ChatML 両対応）
     let s = if let Some(idx) = s.find("<end_of_turn>") {
         &s[..idx]
     } else if let Some(idx) = s.find("<|im_end|>") {
@@ -194,7 +238,6 @@ fn strip_template_tags(s: &str) -> String {
     } else {
         s
     };
-    // 開始タグ行を除去（<start_of_turn>xxx\n / <|im_start|>xxx\n）
     let mut result = String::new();
     let mut rest = s;
     loop {
@@ -228,6 +271,13 @@ mod tests {
         let raw = "<start_of_turn>model\nHello<end_of_turn>\n<start_of_turn>user\nIgnored";
         let cleaned = strip_template_tags(raw);
         assert_eq!(cleaned, "Hello");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_thinking_block() {
+        let raw = "<think>\nfoo\n</think>\nHello";
+        let cleaned = strip_thinking_tags(raw);
+        assert_eq!(cleaned.trim(), "Hello");
     }
 
     #[test]

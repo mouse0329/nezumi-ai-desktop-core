@@ -1,15 +1,17 @@
 mod db;
-use db::{load_db, save_db, key_from_name, models_dir, ModelEntry};
+mod stream_output;
 
+use db::{copy_model_into_store, key_from_name, load_db, save_db, ModelEntry};
 use futures::StreamExt;
 use nezumi_ai_core::{Config, LoadConfig, NezumiCore};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::Path;
+use stream_output::drain_displayable;
 
 #[cfg(target_os = "windows")]
 fn enable_windows_utf8() {
-    use windows_sys::Win32::System::Console::{SetConsoleOutputCP, SetConsoleCP};
+    use windows_sys::Win32::System::Console::{SetConsoleCP, SetConsoleOutputCP};
     unsafe {
         let _ = SetConsoleOutputCP(65001);
         let _ = SetConsoleCP(65001);
@@ -66,44 +68,24 @@ fn cmd_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let path = args.first().ok_or("path required")?;
     let opts = parse_args(args);
     let name = opts.get("name").ok_or("--name required")?;
-    let src_path = Path::new(path);
-    let file_name = src_path.file_name().ok_or("invalid source path")?;
-    let model_dir = models_dir();
-    std::fs::create_dir_all(&model_dir)?;
-
-    let mut dst_path = model_dir.join(file_name);
-    if dst_path.exists() {
-        let stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("model"));
-        let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let mut index = 1;
-        loop {
-            let candidate = if ext.is_empty() {
-                model_dir.join(format!("{}-{}", stem.to_string_lossy(), index))
-            } else {
-                model_dir.join(format!("{}-{}.{}", stem.to_string_lossy(), index, ext))
-            };
-            if !candidate.exists() {
-                dst_path = candidate;
-                break;
-            }
-            index += 1;
-        }
-    }
-
-    std::fs::copy(src_path, &dst_path)?;
-    let model_path = dst_path.to_string_lossy().to_string();
+    let model_path = copy_model_into_store(Path::new(path))?
+        .to_string_lossy()
+        .to_string();
 
     let mut db = load_db();
     let key = key_from_name(name);
-    db.models.insert(key, ModelEntry {
-        name: name.clone(),
-        path: model_path.clone(),
-        gpu_layers: opts.get("gpu").and_then(|v| v.parse().ok()),
-        n_ctx: opts.get("ctx").and_then(|v| v.parse().ok()),
-        system_prompt: opts.get("system").cloned(),
-        temperature: opts.get("temp").and_then(|v| v.parse().ok()),
-        max_tokens: opts.get("max-tokens").and_then(|v| v.parse().ok()),
-    });
+    db.models.insert(
+        key,
+        ModelEntry {
+            name: name.clone(),
+            path: model_path.clone(),
+            gpu_layers: opts.get("gpu").and_then(|v| v.parse().ok()),
+            n_ctx: opts.get("ctx").and_then(|v| v.parse().ok()),
+            system_prompt: opts.get("system").cloned(),
+            temperature: opts.get("temp").and_then(|v| v.parse().ok()),
+            max_tokens: opts.get("max-tokens").and_then(|v| v.parse().ok()),
+        },
+    );
     save_db(&db)?;
     println!("Imported: {} -> {}", name, model_path);
     Ok(())
@@ -266,7 +248,12 @@ async fn cmd_run(name: &str, args: &[String]) -> Result<(), Box<dyn std::error::
     chat_loop(&mut core, max_tokens, temperature).await
 }
 
-async fn chat_loop(core: &mut NezumiCore, max_tokens: usize, temperature: f32) -> Result<(), Box<dyn std::error::Error>> {
+async fn chat_loop(
+    core: &mut NezumiCore,
+    max_tokens: usize,
+    temperature: f32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let show_thinking = core.thinking_enabled();
     loop {
         print!("you> ");
         io::stdout().flush()?;
@@ -289,136 +276,51 @@ async fn chat_loop(core: &mut NezumiCore, max_tokens: usize, temperature: f32) -
         }
         print!("ai>  ");
         io::stdout().flush()?;
-        let mut stream = core.chat_and_save(input, Some(max_tokens), Some(temperature)).await?;
-            let mut buffer = String::new();
-            let mut done = false;
-            let mut skip_until_double_newline = false;  // 思考セクションをスキップ中か
-            
-            while !done {
-                // 次のトークンを受け取る。ストリーム終了なら残バッファを吐いて終わり
-                tokio::select! {
-                    res = stream.next() => {
-                        match res {
-                            Some(token) => buffer.push_str(&token),
-                            None => {
-                                done = true;
+
+        let mut stream = core
+            .chat_and_save(input, Some(max_tokens), Some(temperature))
+            .await?;
+        let mut buffer = String::new();
+        let mut raw_output = String::new();
+        let mut done = false;
+        let mut interrupted = false;
+
+        while !done {
+            tokio::select! {
+                res = stream.next() => {
+                    match res {
+                        Some(token) => {
+                            raw_output.push_str(&token);
+                            buffer.push_str(&token);
+                            let display = drain_displayable(&mut buffer, show_thinking);
+                            if !display.is_empty() {
+                                print!("{display}");
+                                io::stdout().flush()?;
                             }
                         }
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        println!("\n[Interrupted by user]");
-                        done = true;
+                        None => done = true,
                     }
                 }
-                
-                // バッファ処理
-                loop {
-                    if skip_until_double_newline {
-                        // 思考セクション内 → 「\n\n」を探す
-                        if let Some(pos) = buffer.find("\n\n") {
-                            // 見つかった → スキップ終了
-                            skip_until_double_newline = false;
-                            buffer.drain(..pos + 2);  // 「\n\n」も含めて削除
-                            continue;
-                        } else {
-                            // 見つからない → バッファ全部スキップ待ち
-                            buffer.clear();
-                            break;
-                        }
-                    } else {
-                        // 通常モード → 「Thinking Process:」を探す
-                        if let Some(pos) = buffer.find("Thinking Process:") {
-                            // 見つかった → その前のテキストを出力
-                            if pos > 0 {
-                                print!("{}", &buffer[..pos]);
-                            }
-                            // スキップモード開始
-                            skip_until_double_newline = true;
-                            buffer.drain(..pos);
-                            continue;
-                        } else {
-                            // 見つからない → バッファ全部出力
-                            print!("{}", buffer);
-                            buffer.clear();
-                            break;
-                        }
-                    }
-                }
-                io::stdout().flush()?;
-            }
-            // ストリーム終了後に残ったテキストを出力（<end_of_turn>より前など）
-            if !buffer.is_empty() {
-                // タグを除去して残テキストだけ出力
-                let clean: String = buffer
-                    .split('<')
-                    .enumerate()
-                    .filter_map(|(i, part)| {
-                        if i == 0 {
-                            Some(part.to_string())
-                        } else if let Some(end) = part.find('>') {
-                            Some(part[end + 1..].to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                if !clean.is_empty() {
-                    print!("{}", clean);
+                _ = tokio::signal::ctrl_c() => {
+                    println!("\n[Interrupted by user]");
+                    interrupted = true;
+                    done = true;
                 }
             }
-            println!();
-    }
-}
-
-fn consume_start_of_turn_tag(buffer: &mut String) -> bool {
-    const PREFIXES: [&str; 3] = [
-        "<start_of_turn>user\n",
-        "<start_of_turn>model\n",
-        "<start_of_turn>system\n",
-    ];
-    for prefix in PREFIXES {
-        if buffer.starts_with(prefix) {
-            buffer.drain(..prefix.len());
-            return true;
         }
-    }
-    if buffer.starts_with("<start_of_turn>") {
-        if let Some(newline) = buffer.find('\n') {
-            buffer.drain(..newline + 1);
-            return true;
-        }
-    }
-    false
-}
 
-fn consume_think_tag(buffer: &mut String) -> bool {
-    if buffer.starts_with("<think>") {
-        // Check if we have the complete closing tag
-        if let Some(end) = buffer.find("</think>") {
-            // Extract the thinking content (between tags)
-            let think_content = &buffer["<think>".len()..end].trim();
-            
-            if !think_content.is_empty() {
-                // Print thinking content with faint/dimmed style
-                println!("\x1b[2m[思考] {}\x1b[0m", think_content);
+        if !buffer.is_empty() {
+            let display = drain_displayable(&mut buffer, show_thinking);
+            if !display.is_empty() {
+                print!("{display}");
             }
-            
-            // Remove both opening and closing tags and everything between
-            buffer.drain(..end + "</think>".len());
-            return true;
         }
-        // Tag is not yet complete, wait for more tokens
-        return false;
-    }
-    false
-}
 
-fn consume_unknown_tag(buffer: &mut String) -> bool {
-    if let Some(end) = buffer.find('>') {
-        buffer.drain(..=end);
-        true
-    } else {
-        false
+        if interrupted {
+            core.commit_chat_turn(input, &raw_output).await?;
+        }
+
+        println!();
     }
 }
 
@@ -426,11 +328,7 @@ fn consume_unknown_tag(buffer: &mut String) -> bool {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_windows_utf8();
 
-    // Ctrl+C でプロセスが終了しないようにハンドラを設定（何もしない）
-    // これにより tokio::signal::ctrl_c() で制御可能になる
-    let _ = ctrlc::set_handler(|| {
-        // ここでは何もしない。chat_loop 内の tokio::select! で処理する。
-    });
+    let _ = ctrlc::set_handler(|| {});
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {

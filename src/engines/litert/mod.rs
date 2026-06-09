@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Mutex;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::Command;
+
+const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// LiteRT-LM inference via `litert_lm_main` subprocess (avoids linking the full Bazel graph).
 pub struct LiteRTEngine {
@@ -26,6 +29,12 @@ impl LiteRTEngine {
             main_exe: resolve_litert_main_exe(),
             runtime_dir: resolve_runtime_dir(),
         }
+    }
+
+    fn lock_model_path(&self) -> Result<std::sync::MutexGuard<'_, Option<String>>, NezumiError> {
+        self.model_path
+            .lock()
+            .map_err(|e| NezumiError::ModelLoadFailed(format!("litert lock poisoned: {e}")))
     }
 }
 
@@ -73,6 +82,12 @@ fn resolve_runtime_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("LiteRT-LM/prebuilt/windows_x86_64")
 }
 
+fn max_tokens_i32(max_tokens: Option<usize>) -> i32 {
+    max_tokens
+        .unwrap_or(512)
+        .min(i32::MAX as usize) as i32
+}
+
 #[async_trait]
 impl Engine for LiteRTEngine {
     fn supports(&self, meta: &ModelMeta) -> bool {
@@ -94,10 +109,7 @@ impl Engine for LiteRTEngine {
                 "LiteRT-LM expects a .litertlm model file, got: {path}"
             )));
         }
-        *self
-            .model_path
-            .lock()
-            .map_err(|e| NezumiError::ModelLoadFailed(e.to_string()))? = Some(path.to_string());
+        *self.lock_model_path()? = Some(path.to_string());
         Ok(())
     }
 
@@ -144,26 +156,32 @@ impl Engine for LiteRTEngine {
         req: GenerateRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
         let model_path = self
-            .model_path
-            .lock()
-            .map_err(|e| NezumiError::GenerationFailed(e.to_string()))?
+            .lock_model_path()?
             .clone()
-            .ok_or_else(|| {
-                NezumiError::GenerationFailed("No LiteRT-LM model loaded".into())
-            })?;
+            .ok_or_else(|| NezumiError::GenerationFailed("No LiteRT-LM model loaded".into()))?;
 
         let main_exe = self.main_exe.clone();
         let runtime_dir = self.runtime_dir.clone();
-        // Build input_prompt: if the request already contains Gemma-style markers,
-        // don't re-wrap it (avoids duplicate <start_of_turn>user).
         let prompt = req.prompt;
         let input_prompt = if prompt.contains("<start_of_turn>") {
             prompt.clone()
         } else {
-            format!("<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n", prompt)
+            format!(
+                "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
+                prompt
+            )
         };
+        let max_tokens = max_tokens_i32(req.max_tokens);
+        let temperature = req.temperature.unwrap_or(0.8);
 
-        Ok(run_litert_subprocess(&main_exe, &runtime_dir, &model_path, &input_prompt)?)
+        Ok(run_litert_subprocess(
+            &main_exe,
+            &runtime_dir,
+            &model_path,
+            &input_prompt,
+            max_tokens,
+            temperature,
+        )?)
     }
 }
 
@@ -172,6 +190,8 @@ fn run_litert_subprocess(
     runtime_dir: &Path,
     model_path: &str,
     input_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
 ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
     let work_dir = if runtime_dir.exists() {
         runtime_dir
@@ -179,33 +199,33 @@ fn run_litert_subprocess(
         main_exe.parent().unwrap_or(Path::new("."))
     };
 
-    // Build args; on Windows write the prompt to a UTF-8 temp file and pass --input_prompt_file
     let mut args: Vec<String> = Vec::new();
     args.push("--backend=cpu".to_string());
-    args.push(format!("--model_path={}", model_path));
+    args.push(format!("--model_path={model_path}"));
+    args.push(format!("--max_tokens={max_tokens}"));
+    args.push(format!("--temperature={temperature}"));
 
-    // Temp file path holder so we can delete it after the child exits
     let mut temp_prompt_path: Option<std::path::PathBuf> = None;
     if cfg!(windows) {
-        // Write UTF-8 prompt to temp file to avoid codepage/Shift-JIS mangling.
         let mut tmp = std::env::temp_dir();
         let fname = format!("nezumi_input_prompt_{}.txt", std::process::id());
         tmp.push(fname);
-        // Always write UTF-8
         if let Err(e) = std::fs::write(&tmp, input_prompt.as_bytes()) {
-            return Err(NezumiError::GenerationFailed(format!("Failed to write temp input prompt: {e}")));
+            return Err(NezumiError::GenerationFailed(format!(
+                "Failed to write temp input prompt: {e}"
+            )));
         }
         temp_prompt_path = Some(tmp.clone());
         args.push(format!("--input_prompt_file={}", tmp.display()));
     } else {
-        args.push(format!("--input_prompt={}", input_prompt));
+        args.push(format!("--input_prompt={input_prompt}"));
     }
 
     let mut cmd = Command::new(main_exe);
     cmd.current_dir(work_dir)
         .args(args.iter().map(|s| s.as_str()))
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::null());
 
     #[cfg(windows)]
     if work_dir.exists() {
@@ -230,14 +250,26 @@ fn run_litert_subprocess(
         let mut parse_buffer = String::new();
         let mut output_started = false;
         let mut chunk = [0u8; 2048];
+        let deadline = tokio::time::Instant::now() + SUBPROCESS_TIMEOUT;
 
         loop {
-            let n = match reader.read(&mut chunk).await {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) => {
+            if tokio::time::Instant::now() >= deadline {
+                let _ = child.kill().await;
+                yield "[LiteRT error: subprocess timed out]".to_string();
+                break;
+            }
+
+            let n = match tokio::time::timeout_at(deadline, reader.read(&mut chunk)).await {
+                Ok(Ok(0)) => break,
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => {
                     yield format!("[LiteRT error: {e}]");
-                    return;
+                    break;
+                }
+                Err(_) => {
+                    let _ = child.kill().await;
+                    yield "[LiteRT error: subprocess timed out]".to_string();
+                    break;
                 }
             };
 

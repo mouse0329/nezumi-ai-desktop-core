@@ -1,8 +1,27 @@
 #include "llama_wrapper.h"
 #include "llama.cpp/include/llama.h"
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <vector>
+
+static std::atomic<int> g_backend_refs{0};
+
+static void backend_init_once()
+{
+    if (g_backend_refs.fetch_add(1) == 0)
+    {
+        llama_backend_init();
+    }
+}
+
+static void backend_free_once()
+{
+    if (g_backend_refs.fetch_sub(1) == 1)
+    {
+        llama_backend_free();
+    }
+}
 
 struct StoredChatMessage
 {
@@ -179,7 +198,7 @@ static bool reset_llama_context(NezumiLlamaState *state)
 extern "C" NezumiLlamaState *nezumi_llama_load(const char *model_path, int32_t n_ctx, int32_t n_gpu_layers, NezumiProgressCallback progress_cb, void *progress_user_data)
 {
     llama_log_set(dummy_log_callback, nullptr);
-    llama_backend_init();
+    backend_init_once();
 
     auto mparams = llama_model_default_params();
     mparams.n_gpu_layers = n_gpu_layers;
@@ -406,41 +425,6 @@ extern "C" int nezumi_llama_chat(
         }
     }
 
-    // Qwen instant directive handling for thinking mode
-    // /no_think prevents thinking, so when absent, model can generate thinking
-    if (prompt.find("/no_think") == std::string::npos &&
-        prompt.find("</think>") == std::string::npos)
-    {
-        const std::string assistant_start = "<|im_start|>assistant\n";
-        const std::string think_begin = "<think>\n";
-        // Start the assistant response with thinking tag to encourage thinking mode
-        if (prompt.size() >= assistant_start.size() &&
-            prompt.compare(prompt.size() - assistant_start.size(), assistant_start.size(), assistant_start) == 0)
-        {
-            prompt += think_begin;
-        }
-    }
-
-    std::string escaped_prompt;
-    escaped_prompt.reserve(prompt.size() * 2);
-    for (char c : prompt)
-    {
-        switch (c)
-        {
-        case '\n':
-            escaped_prompt += "\\n";
-            break;
-        case '\r':
-            escaped_prompt += "\\r";
-            break;
-        case '\t':
-            escaped_prompt += "\\t";
-            break;
-        default:
-            escaped_prompt.push_back(c);
-            break;
-        }
-    }
     return generate_from_prompt(state, prompt, max_tokens, temperature, cb, user_data);
 }
 
@@ -454,6 +438,6 @@ extern "C" void nezumi_llama_free(NezumiLlamaState *state)
         llama_free(state->ctx);
     if (state->model)
         llama_model_free(state->model);
-    llama_backend_free();
+    backend_free_once();
     delete state;
 }

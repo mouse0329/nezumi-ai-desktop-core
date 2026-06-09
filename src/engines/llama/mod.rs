@@ -60,6 +60,26 @@ extern "C" {
     fn nezumi_llama_free(state: *mut NezumiLlamaState);
 }
 
+static INFERENCE_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_inference() -> std::sync::MutexGuard<'static, ()> {
+    INFERENCE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn lock_state(
+    state: &Mutex<*mut NezumiLlamaState>,
+) -> Result<std::sync::MutexGuard<'_, *mut NezumiLlamaState>, NezumiError> {
+    state
+        .lock()
+        .map_err(|e| NezumiError::InferenceError(format!("llama state lock poisoned: {e}")))
+}
+
+fn max_tokens_i32(max_tokens: usize) -> i32 {
+    max_tokens.min(i32::MAX as usize) as i32
+}
+
 pub struct LlamaEngine {
     state: Mutex<*mut NezumiLlamaState>,
 }
@@ -77,9 +97,11 @@ impl LlamaEngine {
 
 impl Drop for LlamaEngine {
     fn drop(&mut self) {
-        let ptr = *self.state.lock().unwrap();
-        if !ptr.is_null() {
-            unsafe { nezumi_llama_free(ptr) };
+        if let Ok(guard) = lock_state(&self.state) {
+            let ptr = *guard;
+            if !ptr.is_null() {
+                unsafe { nezumi_llama_free(ptr) };
+            }
         }
     }
 }
@@ -120,7 +142,7 @@ impl Engine for LlamaEngine {
             return Err(NezumiError::ModelLoadFailed(path.to_string()));
         }
 
-        let mut guard = self.state.lock().unwrap();
+        let mut guard = lock_state(&self.state)?;
         if !guard.is_null() {
             unsafe { nezumi_llama_free(*guard) };
         }
@@ -132,14 +154,14 @@ impl Engine for LlamaEngine {
         &self,
         req: GenerateRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
-        let ptr = *self.state.lock().unwrap();
+        let ptr = *lock_state(&self.state)?;
         if ptr.is_null() {
             return Err(NezumiError::ModelNotLoaded);
         }
 
         let cprompt = CString::new(req.prompt)
             .map_err(|_| NezumiError::InferenceError("invalid prompt".into()))?;
-        let max_tokens = req.max_tokens.unwrap_or(512) as i32;
+        let max_tokens = max_tokens_i32(req.max_tokens.unwrap_or(512));
         let temperature = req.temperature.unwrap_or(0.8);
         let state_addr = ptr as usize;
         let prompt_bytes = cprompt.into_bytes_with_nul();
@@ -166,7 +188,7 @@ impl Engine for LlamaEngine {
         max_tokens: Option<usize>,
         temperature: Option<f32>,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, NezumiError> {
-        let ptr = *self.state.lock().unwrap();
+        let ptr = *lock_state(&self.state)?;
         if ptr.is_null() {
             return Err(NezumiError::ModelNotLoaded);
         }
@@ -186,7 +208,7 @@ impl Engine for LlamaEngine {
             })
             .collect::<Result<_, _>>()?;
 
-        let max_tokens = max_tokens.unwrap_or(512) as i32;
+        let max_tokens = max_tokens_i32(max_tokens.unwrap_or(512));
         let temperature = temperature.unwrap_or(0.8);
         let state_addr = ptr as usize;
 
@@ -232,7 +254,6 @@ where
     unsafe extern "C" fn token_cb(token: *const c_char, user_data: *mut c_void) -> c_int {
         let state = &*(user_data as *mut TokenCallbackState);
         let s = CStr::from_ptr(token).to_string_lossy();
-        // Raw token debug output is intentionally suppressed.
         if state.tx.send(s.into_owned()).is_err() {
             return 1;
         }
@@ -242,24 +263,24 @@ where
     let cb_state = TokenCallbackState { tx };
     let cb_state_addr = Box::into_raw(Box::new(cb_state)) as usize;
 
-    tokio::task::spawn_blocking(move || {
+    let join = tokio::task::spawn_blocking(move || {
+        let _guard = lock_inference();
         let state_ptr = state_addr as *mut NezumiLlamaState;
         let cb_state_ptr = cb_state_addr as *mut TokenCallbackState;
-        let ret = run(
-            state_ptr,
-            token_cb,
-            cb_state_ptr as *mut c_void,
-        );
+        let ret = run(state_ptr, token_cb, cb_state_ptr as *mut c_void);
 
         let cb_state = unsafe { Box::from_raw(cb_state_ptr) };
         if ret != 0 {
-            let _ = cb_state.tx.send(format!("Error: llama error {}", ret));
+            let _ = cb_state.tx.send(format!("Error: llama error {ret}"));
         }
     });
 
     Ok(Box::pin(stream! {
         while let Some(token) = rx.recv().await {
             yield token;
+        }
+        if let Err(e) = join.await {
+            yield format!("[Inference task failed: {e}]");
         }
     }))
 }

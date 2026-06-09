@@ -22,6 +22,14 @@ pub mod memory {
     use super::*;
     use std::sync::Mutex;
 
+    fn lock_messages(
+        messages: &Mutex<Vec<Message>>,
+    ) -> Result<std::sync::MutexGuard<'_, Vec<Message>>, NezumiError> {
+        messages
+            .lock()
+            .map_err(|e| NezumiError::InferenceError(format!("session lock poisoned: {e}")))
+    }
+
     pub struct InMemoryStore {
         messages: Mutex<Vec<Message>>,
     }
@@ -37,7 +45,7 @@ pub mod memory {
     #[async_trait]
     impl SessionStore for InMemoryStore {
         async fn add(&self, role: &str, content: &str) -> Result<(), NezumiError> {
-            self.messages.lock().unwrap().push(Message {
+            lock_messages(&self.messages)?.push(Message {
                 role: role.to_string(),
                 content: content.to_string(),
             });
@@ -45,11 +53,11 @@ pub mod memory {
         }
 
         async fn history(&self) -> Result<Vec<Message>, NezumiError> {
-            Ok(self.messages.lock().unwrap().clone())
+            Ok(lock_messages(&self.messages)?.clone())
         }
 
         async fn clear(&self) -> Result<(), NezumiError> {
-            self.messages.lock().unwrap().clear();
+            lock_messages(&self.messages)?.clear();
             Ok(())
         }
     }
